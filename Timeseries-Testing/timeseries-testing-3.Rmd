@@ -1,0 +1,411 @@
+---
+title: "timeseries-testing"
+output: html_document
+---
+
+## Read in timeseries and clean
+
+```{r}
+
+library(imputeTS)
+library(dplyr)
+
+# toggle whether to do fitting on smoothed EVI or non-smoothed (post cloud filtered) EVI
+use_smoothed <- 1
+
+ts <- read.csv('point15.csv')[,1:3]
+
+colnames(ts) <- c('date', 'EVI_raw', 'EVI_smoothed')
+ts$date <- as.Date(ts$date, '%d-%h-%y')
+ts$day <- as.numeric(ts$date - as.Date('2016-08-01')) # number of days
+ts$EVI_smoothed <- na.interpolation(ts$EVI_smoothed)
+ts$EVI_raw <- na.interpolation(ts$EVI_raw)
+
+if (use_smoothed == 1) {
+  ts <- ts %>% select(-c(EVI_raw)) %>% # don't need EVI_raw column
+        rename(EVI = EVI_smoothed) %>%
+         distinct()
+} else if (use_smoothed == 0) {
+  ts <- ts %>% select(-c(EVI_smoothed)) %>%
+    rename(EVI = EVI_raw)
+}
+
+
+year <- 2017
+year_start = year - 1
+year_end = year
+
+```
+
+## My GEE algorithm
+
+```{r}
+
+window_EVI_1 <- 20 # days, NOT data points
+window_EVI_2 <- 20 # days
+window_dEVI <- 40 # days
+
+# need to read in, because regardless of whether use smooth or unsmoothed EVI for the other fitting methods, must start with nonsmoothed EVI here. doubly smoothed EVI (20, 20) is in the csv
+ts <- read.csv('test_point6.csv')[,1:2]
+
+colnames(ts) <- c('date', 'EVI_raw')
+ts$date <- as.Date(ts$date, '%d-%h-%y')
+ts$day <- as.numeric(ts$date - as.Date('2016-08-01')) # number of days
+
+
+# cut EVI to only Aug 1, 2016 to July 31, 2017
+ts <- ts[ts$day >= 0 & ts$day <= 365,]
+
+
+EVI_raw <- ts$EVI_raw
+t <- ts$day
+
+# function to smooth by certain number of days (not by index). numDays creates +/- window; so actual smoothing window is - numDays to + numDays
+smooth_by_days <- function(numDays, t, values) {
+  
+  smoothed <- numeric(length(values))
+  
+  for (index in 1:length(values)) {
+    
+    # get time window
+    day_center <- t[index]
+    day_start <- day_center - numDays
+    day_end <- day_center + numDays
+    
+    # get indices corresponding to time window
+    indices <- which(t >= day_start & t <= day_end)
+    
+    # get average of values over the indices and save
+    mean_value <- mean(values[indices], na.rm = TRUE)
+    
+    smoothed[index] <- mean_value
+    
+  }
+  
+  return(smoothed)
+}
+
+# smooth EVI series by 20 days, then 20 days
+EVI_smoothed1 <- smooth_by_days(window_EVI_1, t, EVI_raw)
+EVI_smoothed2 <- smooth_by_days(window_EVI_2, t, EVI_smoothed1)
+
+# confirm that my smoothed version (blue points) matches 
+plot(t, EVI_raw)
+points(t, EVI_smoothed2, col = 'red')
+points(t, ts$EVI_smoothed2, col = 'blue')
+
+# calculate first derivative of smoothed EVI (forward 1st order difference)
+
+calc_1st_deriv <- function(values) {
+  
+  derivatives <- numeric(length(values))
+  
+  for (index in 1:(length(values)-1)) {
+
+    derivative <- values[index + 1] - values[index]
+
+    derivatives[index] <- derivative
+  }
+  
+  derivatives[length(values)] <- derivatives[length(values) - 1] # to make sure the 1st derivative length still matches total time
+  
+  return(derivatives)
+}
+
+dEVI <- calc_1st_deriv(unique(EVI_smoothed2))
+
+#plot(t, ts$firstDeriv_unsmoothed, main = 'derivative, unsmoothed')
+#points(unique(t), dEVI, col = 'red')
+
+# calculate smoothed dEVI
+dEVI_smoothed <- smooth_by_days(window_dEVI, unique(t), dEVI)
+
+#plot(t, ts$firstDeriv_smoothed, main = 'derivative, smoothed')
+#points(unique(t), dEVI_smoothed, col = 'red')
+
+# save R-calculated timeseries
+ts_R <- data.frame(t, dEVI = rep(dEVI, each = 2), dEVI_smoothed = rep(dEVI_smoothed, each = 2), EVI_smoothed1, EVI_smoothed2, EVI_raw)
+
+# apply peak cutoff date (April 1), find max EVI for first crop
+peakCutoffDay <- as.numeric(as.Date('2017-04-01') - as.Date('2016-08-01')) # number of days between cutoff day and Aug 1
+ts_firstCrop_R <- ts_R[which(ts_R$t <= peakCutoffDay), ]
+
+# numerically find date of maxEVI and max dEVI (after smoothing)
+maxEVIday <- ts_firstCrop_R$t[which(ts_firstCrop_R$EVI_smoothed2 == max(ts_firstCrop_R$EVI_smoothed2))][1]
+maxdEVIday <- ts_firstCrop_R$t[which(ts_firstCrop_R$dEVI_smoothed == max(ts_firstCrop_R$dEVI_smoothed))][1]
+
+quarterPd <- maxEVIday - maxdEVIday
+
+# get window over which to fit
+windowStart <- maxEVIday - 2*quarterPd
+windowEnd <- maxEVIday + quarterPd
+ts_firstCropFitting_R <- ts_firstCrop_R[which(ts_firstCrop_R$t >= windowStart & ts_firstCrop_R$t <= windowEnd),]
+
+freq_invYrs <- 1/(4*(quarterPd/365)) # omega
+
+# fit over first crop. benchmark to Aug 1
+t_yrs <- (ts_firstCropFitting_R$t)/365
+wt <- 2*3.14*freq_invYrs*t_yrs
+EVI_fitting <- ts_firstCropFitting_R$EVI_smoothed2
+
+# Model that sets w (as in TIMESAT)
+model_GEE_harmonic <- lm(EVI_fitting~ t_yrs + cos(wt) + sin(wt))
+
+plot(t_yrs, EVI_fitting)
+lines(t_yrs, EVI_fitting, col = "green")
+lines(t_yrs, fitted(model_GEE_harmonic), col = "red")
+
+# calculate fitted maximum day. NOTE, the fitted phi doesn't always match with GEE fitted phi... GEE's phi is usually around +2 or -3
+b2 <- model_GEE_harmonic$coefficients[3]
+b3 <- model_GEE_harmonic$coefficients[4]
+phi <- (atan(b3/b2))
+
+# the phase when calculated from the day the harmonic function started fitting (windowStart)
+maxEVIday_fromAug1 <- 365*phi/(2*3.14*freq_invYrs)
+if (maxEVIday_fromAug1 < 0) {maxEVIday_fromAug1 <- maxEVIday_fromAug1 + 365/freq_invYrs}
+
+```
+
+
+## Savitsky-Golay fitting
+
+```{r}
+library(signal) # Savitsky-Golay fitting
+
+# TARGET THE APPROPRIATE TIME PERIOD FOR FITTING
+# find index of important dates, use to target specific parts of the year
+targeted_start_day <- as.numeric(as.Date('2016-09-01') - as.Date('2016-08-01'))
+targeted_end_day <- as.numeric(as.Date('2017-10-01') - as.Date('2016-08-01'))
+targeted_days <- which(ts$day >= targeted_start_day & ts$day <= targeted_end_day) # index of days to target
+
+EVI <- ts$EVI[targeted_days]
+t <- ts$day[targeted_days]
+
+# Savitsky-Golay filter
+EVI_SG <- sgolayfilt(EVI, p = 2, n = 15)
+
+plot(t, EVI)
+lines(t, EVI, col = "green")
+lines(t, EVI_SG, col = "red")
+
+# find phenological dates, first make sure the dates found are for first crop, first or second half
+firstHalf_dates <- which(t >= 40 & t <= 160) # rising limb of first crop
+t_firstHalf <- t[firstHalf_dates]
+fittedEVI_firstHalf <- EVI_SG[firstHalf_dates]
+
+secondHalf_dates <- which(t >= 140 & t <= 220) # falling limb of first crop
+t_secondHalf <- t[secondHalf_dates]
+fittedEVI_secondHalf <- EVI_SG[secondHalf_dates]
+
+firstCrop_dates <- which(t >= 40 & t <= 220) # first crop
+t_firstCrop <- t[firstCrop_dates]
+fittedEVI_firstCrop <- EVI_SG[firstCrop_dates]
+
+# date and value of max EVI
+maxEVI <- max(fittedEVI_firstCrop)
+minEVI_left <- min(fittedEVI_firstHalf)
+minEVI_right <- min(fittedEVI_secondHalf)
+
+date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)
+
+# find phenological dates
+startOfSeasonEVI <- 0.1*(maxEVI - minEVI_left) + minEVI_left
+endOfSeasonEVI <- 0.1*(maxEVI - minEVI_right) + minEVI_right
+
+rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+date_startOfSeason <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = startOfSeasonEVI)
+date_endOfSeason <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = endOfSeasonEVI)
+
+date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)
+date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)
+midSeason <- mean(c(date_rightOfPeak$y, date_leftOfPeak$y))
+
+quarter_period1 <- (date_endOfSeason$y - date_startOfSeason$y)/4
+quarter_period2 <- (midSeason - date_startOfSeason$y)/2
+quarter_period3 <- (date_endOfSeason$y - midSeason)/2
+quarter_period_comparable <- (midSeason - date_min$y)/2
+mean_quarter_period = mean(c(quarter_period1, quarter_period2, quarter_period3))
+
+print(c('date_startOfSeason', date_startOfSeason$y))
+print(c('date_endOfSeason', date_endOfSeason$y))
+print(c('midSeason', midSeason))
+print(c('q pd 1', quarter_period1))
+print(c('q pd 2', quarter_period2))
+print(c('q pd 3', quarter_period3))
+print(c('mean qpd', mean_quarter_period))
+print(c('comparable quarter period', quarter_period_comparable))
+
+```
+
+## Harmonic fitting with estimated omega
+
+```{r}
+
+# TARGET THE APPROPRIATE TIME PERIOD FOR FITTING
+# find index of important dates, use to target specific parts of the year
+targeted_start_day <- as.numeric(as.Date('2016-10-01') - as.Date('2016-08-01'))
+targeted_end_day <- as.numeric(as.Date('2017-07-01') - as.Date('2016-08-01'))
+targeted_days <- which(ts$day >= targeted_start_day & ts$day <= targeted_end_day) # index of days to target
+
+EVI <- ts$EVI[targeted_days]
+t <- ts$day[targeted_days]
+
+t_fitting <- t/(2*3.14)
+
+# Model that estimates w
+model_nls1 <- nls(EVI~c1 + c2*t_fitting + c3*(t_fitting^2) + c4*sin(w*t_fitting) + c5*cos(w*t_fitting) +
+               c6*sin(2*w*t_fitting) + c7*cos(2*w*t_fitting), #+ 
+               #c8*sin(3*w*t_fitting) + c9*cos(3*w*t_fitting), 
+             start = list(c1 = 0.5, c2 = 0, c3 = 0, 
+                          c4 = 1, c5 = 1, c6 = 1,
+                          c7 = 1, #c8 = 1, c9 = 1,
+                          w = 0.15
+                          ),
+             control = nls.control(maxiter = 500))
+
+plot(t, EVI)
+lines(t, EVI, col = "green")
+lines(t, fitted(model_nls1), col = "red")
+
+# retreive omega from estimated coefficients
+omega <- summary(model_nls1)$parameters[8]
+quarter_period <- 3.14/(2*omega)
+period <- 2*3.14/omega
+
+# find phenological dates, first make sure the dates found are for first crop, first or second half
+firstHalf_dates <- which(t >= 40 & t <= 160) # rising limb of first crop
+t_firstHalf <- t[firstHalf_dates]
+fittedEVI_firstHalf <- fitted(model_nls1)[firstHalf_dates]
+
+secondHalf_dates <- which(t >= 140 & t <= 220) # falling limb of first crop
+t_secondHalf <- t[secondHalf_dates]
+fittedEVI_secondHalf <- fitted(model_nls1)[secondHalf_dates]
+
+firstCrop_dates <- which(t >= 40 & t <= 220) # first crop
+t_firstCrop <- t[firstCrop_dates]
+fittedEVI_firstCrop <- fitted(model_nls1)[firstCrop_dates]
+
+# date and value of max EVI
+maxEVI <- max(fittedEVI_firstCrop)
+minEVI_left <- min(fittedEVI_firstHalf)
+minEVI_right <- min(fittedEVI_secondHalf)
+
+date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)
+
+# find phenological dates
+startOfSeasonEVI <- 0.1*(maxEVI - minEVI_left) + minEVI_left
+endOfSeasonEVI <- 0.1*(maxEVI - minEVI_right) + minEVI_right
+
+rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+date_startOfSeason <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = startOfSeasonEVI)
+date_endOfSeason <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = endOfSeasonEVI)
+
+date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)
+date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)
+midSeason <- mean(c(date_rightOfPeak$y, date_leftOfPeak$y))
+
+quarter_period1 <- (date_endOfSeason$y - date_startOfSeason$y)/4
+quarter_period2 <- (midSeason - date_startOfSeason$y)/2
+quarter_period3 <- (date_endOfSeason$y - midSeason)/2
+quarter_period_comparable <- (midSeason - date_min$y)/2
+mean_quarter_period = mean(c(quarter_period1, quarter_period2, quarter_period3))
+
+print(c('date_startOfSeason', date_startOfSeason$y))
+print(c('date_endOfSeason', date_endOfSeason$y))
+print(c('midSeason', midSeason))
+print(c('q pd 1', quarter_period1))
+print(c('q pd 2', quarter_period2))
+print(c('q pd 3', quarter_period3))
+print(c('mean qpd', mean_quarter_period))
+print(c('comparable quarter period', quarter_period_comparable))
+
+```
+
+## Harmonic fitting exactly as in TIMESAT
+
+```{r}
+
+# TARGET THE APPROPRIATE TIME PERIOD FOR FITTING
+# find index of important dates, use to target specific parts of the year
+targeted_start_day <- as.numeric(as.Date('2016-09-01') - as.Date('2016-08-01'))
+targeted_end_day <- as.numeric(as.Date('2017-07-01') - as.Date('2016-08-01'))
+targeted_days <- which(ts$day >= targeted_start_day & ts$day <= targeted_end_day) # index of days to target
+
+EVI <- ts$EVI[targeted_days]
+t <- ts$day[targeted_days]
+
+wt <- (6*3.14/length(ts$day))*t/(2*3.14)
+
+# Model that sets w (as in TIMESAT)
+model_nls2 <- nls(EVI~c1 + c2*t + c3*(t^2) + c4*sin(wt) + c5*cos(wt) +
+               c6*sin(2*wt) + c7*cos(2*wt) + 
+               c8*sin(3*wt) + c9*cos(3*wt), 
+             start = list(c1 = 0.5, c2 = 0, c3 = 0, 
+                          c4 = 0, c5 = 0, c6 = 0,
+                          c7 = 0, c8 = 0, c9 = 0
+                          ),
+             control = nls.control(maxiter = 500))
+
+plot(t, EVI)
+lines(t, EVI, col = "green")
+lines(t, fitted(model_nls2), col = "red")
+
+# retreive omega from estimated coefficients
+omega <- 6*3.14/length(t)
+quarter_period <- 3.14/(2*omega)
+period <- 2*3.14/omega
+
+# find phenological dates, first make sure the dates found are for first crop, first or second half
+firstHalf_dates <- which(t >= 50 & t <= 160) # rising limb of first crop
+t_firstHalf <- t[firstHalf_dates]
+fittedEVI_firstHalf <- fitted(model_nls2)[firstHalf_dates]
+
+secondHalf_dates <- which(t >= 140 & t <= 220) # falling limb of first crop
+t_secondHalf <- t[secondHalf_dates]
+fittedEVI_secondHalf <- fitted(model_nls2)[secondHalf_dates]
+
+firstCrop_dates <- which(t >= 50 & t <= 220) # first crop
+t_firstCrop <- t[firstCrop_dates]
+fittedEVI_firstCrop <- fitted(model_nls2)[firstCrop_dates]
+
+# date and value of max EVI
+maxEVI <- max(fittedEVI_firstCrop)
+minEVI_left <- min(fittedEVI_firstHalf)
+minEVI_right <- min(fittedEVI_secondHalf)
+
+date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)
+
+# find phenological dates, need to interpolate linearly with approx
+startOfSeasonEVI <- 0.1*(maxEVI - minEVI_left) + minEVI_left
+endOfSeasonEVI <- 0.1*(maxEVI - minEVI_right) + minEVI_right
+
+rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+date_startOfSeason <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = startOfSeasonEVI)
+date_endOfSeason <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = endOfSeasonEVI)
+
+date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)
+date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)
+midSeason <- mean(c(date_rightOfPeak$y, date_leftOfPeak$y))
+
+quarter_period1 <- (date_endOfSeason$y - date_startOfSeason$y)/4
+quarter_period2 <- (midSeason - date_startOfSeason$y)/2
+quarter_period3 <- (date_endOfSeason$y - midSeason)/2
+quarter_period_comparable <- (midSeason - date_min$y)/2
+mean_quarter_period = mean(c(quarter_period1, quarter_period2, quarter_period3))
+
+print(c('date_startOfSeason', date_startOfSeason$y))
+print(c('date_endOfSeason', date_endOfSeason$y))
+print(c('midSeason', midSeason))
+print(c('q pd 1', quarter_period1))
+print(c('q pd 2', quarter_period2))
+print(c('q pd 3', quarter_period3))
+print(c('mean qpd', mean_quarter_period))
+print(c('comparable quarter period', quarter_period_comparable))
+```
+

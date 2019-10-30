@@ -1,0 +1,188 @@
+---
+title: "Spectral_differentiation_v2"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(reshape2)
+library(tidyr)
+
+#setwd("~/Documents/R-code/LandCover/Soy-vs-Nonsoy-Agri")
+agsat_raw <- read.csv("modis_table_agsat.csv")
+plos_raw <- read.csv("modis_table_plos.csv")
+
+year <- 2007
+```
+
+## Functions
+
+```{r functions}
+# turns date in millis into date
+ms_to_date = function(ms, t0="1970-01-01", timezone) {
+  sec = ms / 1000
+  as.POSIXct(sec, origin=t0, tz=timezone)
+}
+
+# take raw data and add class as factor, clean up date columns, add vegetation indeces
+clean_raw_data = function(data_raw, year) {
+  
+  # turn class into a factor
+  data_raw$class <- as.factor(data_raw$class)
+  
+  # specify that original 'year' in data is actually harvest year
+  data_raw$harvest_year <- data_raw$year
+  data <- select(data_raw, -year)
+  
+  data_year <- data[data$harvest_year == year,]
+  
+  # turn DOY into month
+  # data_year$date <- ms_to_date(data_year$system.time_start, timezone="America/Los_Angeles")
+  data_year$month <- month(as.Date(data_year$DayOfYear, origin = paste0(year, '-01-01')))
+  
+  # remove data with no month 
+  data_year <- data_year[complete.cases(data_year$month),]
+  
+  # add SR vegetation index (NIR/red)
+  data_year$SR <- (data_year$sur_refl_b02)/(data_year$sur_refl_b01)
+  
+  # add NDVI (NIR - red)/(NIR + red)
+  data_year$NDVI <- (data_year$sur_refl_b02 - data_year$sur_refl_b01)/(data_year$sur_refl_b01 + data_year$sur_refl_b02)
+
+  # add EVI 2.5(NIR - red)/(NIR + 6red - 7.5blue + 1)
+  data_year$EVI <- 2.5*(data_year$sur_refl_b02 - data_year$sur_refl_b01)/
+                    (data_year$sur_refl_b02 + 6*data_year$sur_refl_b01 - 7.5*data_year$sur_refl_b03 + 1)
+  
+  # add CI_green (NIR/green) - 1
+  data_year$CI_green <- (data_year$sur_refl_b02)/(data_year$sur_refl_b04) - 1
+  
+  return(data_year)
+}
+
+# turn output of clean_raw_data into tidy format for individual bands
+get_tidy_data = function(data, year) {
+  tidy <- melt(data, id = c("month", "class", "DayOfYear"), 
+                        measure.vars = c("sur_refl_b01", "sur_refl_b02", "sur_refl_b03", "sur_refl_b04",
+                                         "sur_refl_b05", "sur_refl_b07")) # GOT RID OF"sur_refl_b06" because current version of plos data doesn't have this
+
+  # turn variable name from sur_refl_b01, etc to integer
+  tidy$band_id <- as.numeric(substr(tidy$variable, 12, 13))
+  
+  return(tidy)
+}
+
+# turn output of clean_raw_data into tidy format for multiband indices
+get_tidy_data_indices = function(data, year) {
+  tidy <- melt(data, id = c("month", "class", "DayOfYear"), 
+                        measure.vars = c("SR", "NDVI", "EVI", "CI_green"))
+  return(tidy)
+}
+
+calculate_summary = function(tidy, year) {
+  
+  # calculate mean and stdev of reflectance per (band x class x month)
+  split <- tidy %>% split(f = list(tidy$class, tidy$month, tidy$band_id))
+  means <- sapply(split, FUN = select, value) %>% lapply(mean, na.rm = TRUE) %>% unlist()
+  stdevs <- sapply(split, FUN = select, value) %>% lapply(sd, na.rm = TRUE) %>% unlist()
+  
+  summary <- data.frame(class.month.band_id.value = names(means), 
+                              mean = means, stdev = stdevs)
+  summary <- tidyr::separate(data = summary, col = "class.month.band_id.value", into = c("class", "month", "band_id", "value"))
+  
+  return(summary)
+}
+
+calculate_summary_indices = function(tidy, year) {
+  
+  # calculate mean and stdev of reflectance per (band x class x month)
+  split <- tidy %>% split(f = list(tidy$class, tidy$month, tidy$variable))
+  means <- sapply(split, FUN = select, value) %>% lapply(mean, na.rm = TRUE) %>% unlist()
+  stdevs <- sapply(split, FUN = select, value) %>% lapply(sd, na.rm = TRUE) %>% unlist()
+  
+  summary <- data.frame(class.month.variable.value = names(means), 
+                              mean = means, stdev = stdevs)
+  summary <- tidyr::separate(data = summary, col = "class.month.variable.value", into = c("class", "month", "index", "value"))
+  
+  return(summary)
+}
+
+```
+
+## Computations
+
+```{r computations}
+# clean the raw data
+agsat <- clean_raw_data(agsat_raw, year)
+plos <- clean_raw_data(plos_raw, year)
+
+# turn into tidy data
+agsat_tidy <- get_tidy_data(agsat, year)
+plos_tidy <- get_tidy_data(plos, year)
+
+agsat_tidy_indices <- get_tidy_data_indices(agsat, year)
+plos_tidy_indices <- get_tidy_data_indices(plos, year)
+
+# calculate summary
+agsat_summary <- calculate_summary(agsat_tidy, year)
+plos_summary <- calculate_summary(plos_tidy, year)
+
+agsat_summary_indices <- calculate_summary_indices(agsat_tidy_indices, year)
+plos_summary_indices <- calculate_summary_indices(plos_tidy_indices, year)
+
+print(agsat_summary_indices)
+print(plos_summary_indices)
+
+```
+
+## Plots
+```{r plots}
+
+get_scatterplot <- function(data_frame, data_name, year, ymax) {
+  plot <- ggplot(data = data_frame, aes(x = band_id, y = value, col = class)) +
+                  geom_point(alpha = 0.5) +
+                  facet_wrap(vars(month)) +
+                  ggtitle(paste(data_name, "for year", year)) +
+                  xlab("MODIS band") + ylab("reflectance") +
+                  coord_cartesian(ylim = c(0, ymax))
+  return(plot)
+}
+
+get_summary_scatterplot <- function(data_frame, data_name, year, ymax) {
+  plot <- ggplot(data = data_frame, aes(x = band_id, y = mean, col = class, pch = class)) +
+                geom_point(alpha = 0.8) +
+                geom_errorbar(data = data_frame, aes(x = band_id, ymin = mean - stdev, ymax = mean + stdev)) +
+                facet_wrap(~month) +
+                ggtitle(paste(data_name, "summary for year", year)) +
+                xlab("MODIS band") + ylab("reflectance") +
+                  coord_cartesian(ylim = c(0, ymax))
+  return(plot)
+}
+
+get_summary_scatterplot_indices <- function(data_frame, data_name, year, ymax) {
+  plot <- ggplot(data = data_frame, aes(x = index, y = mean, col = class, pch = class)) +
+                geom_point(alpha = 0.8) +
+                geom_errorbar(data = data_frame, aes(x = index, ymin = mean - stdev, ymax = mean + stdev)) +
+                facet_wrap(~month) +
+                ggtitle(paste(data_name, "summary for year", year)) +
+                xlab("Vegetation Index") + ylab("index value") +
+                  coord_cartesian(ylim = c(0, ymax))
+  return(plot)
+}
+
+#print(get_scatterplot(agsat_tidy, "agsat", year, 7000))
+#print(get_scatterplot(plos_tidy, "plos", year, 7000))
+#print(get_summary_scatterplot(agsat_summary,"agsat", year, 7000))
+#print(get_summary_scatterplot(plos_summary, "plos", year, 7000))
+#print(get_summary_scatterplot(agsat_summary,"agsat", year, 2000))
+#print(get_summary_scatterplot(plos_summary, "plos", year, 2000))
+print(get_summary_scatterplot_indices(agsat_summary_indices,"agsat", year, 10))
+print(get_summary_scatterplot_indices(plos_summary_indices, "plos", year, 10))
+
+```
+
+
+

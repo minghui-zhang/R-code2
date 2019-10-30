@@ -1,0 +1,982 @@
+---
+title: "Geogrpahically weighted regression"
+output: html_document
+---
+
+Geographically weighted regression for one year
+
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(splm)
+library(lmtest)
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+percentile5_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile5_onset_cell_v2.csv')
+percentile95_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile95_onset_cell_v2.csv')
+
+median_muni_raw <- read.csv('E:/R-code/Modeling/data/median_muni_v2.csv')
+percentile5_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile5_muni_v2.csv')
+percentile95_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile95_muni_v2.csv')
+
+median_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/median_CARpoly_v2.csv')
+percentile5_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile5_CARpoly_v2.csv')
+percentile95_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile95_CARpoly_v2.csv')
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+#cell_shp <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+
+```
+
+
+
+## spatial join muni to CARpolys
+
+```{r}
+
+# rename columns of CARpoly data and combine into a single csv before spatial join
+median_CARpoly_raw <- rename_cols_median_CARpoly(median_CARpoly_raw)
+percentile5_CARpoly_raw <- rename_cols_percentile5_CARpoly(percentile5_CARpoly_raw)
+percentile95_CARpoly_raw <- rename_cols_percentile95_CARpoly(percentile95_CARpoly_raw)
+CARpoly_raw <- create_CARpoly_raw(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw)
+
+CARpoly_raw <- join_CARpoly_to_muni(CARpoly_raw)
+
+```
+
+## constants
+
+```{r}
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## rename and delete the columns (only needed for median)
+
+```{r}
+
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+percentile5_cell <- percentile5_cell_raw %>% filter(year > 0)
+percentile95_cell <- percentile95_cell_raw %>% filter(year > 0)
+
+# median muni
+median_muni <- median_muni_raw %>% rename_cols_median_muni()
+percentile5_muni <- percentile5_muni_raw %>% filter(year > 0)
+percentile95_muni <- percentile95_muni_raw %>% filter(year > 0)
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+# add cell_ID
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+```
+
+## tidy the data and categorize the numeric variables
+
+```{r}
+
+# create tidy datasets
+cell_tidy <- tidy_combine_cell(median_cell, percentile5_cell, percentile95_cell)
+muni_tidy <- tidy_combine_muni(median_muni, percentile5_muni, percentile95_muni)
+CARpoly_tidy <- tidy_CARpoly(CARpoly_raw)
+
+
+
+# categorize numeric variables
+cell_tidy <- categorize_vars_cell_tidy(cell_tidy)
+cell_untidy <- categorize_vars_cell_untidy(median_cell)
+
+muni_tidy <- categorize_vars_muni_tidy(muni_tidy)
+muni_untidy <- categorize_vars_muni_untidy(median_muni)
+
+
+CARpoly_tidy <- categorize_vars_CARpoly_tidy(CARpoly_tidy) %>% delete_cols_CARpoly_tidy()
+CARpoly_untidy <- categorize_vars_CARpoly_untidy(CARpoly_raw) 
+# change rename cols and delete unnecessary cols
+CARpoly_untidy <- CARpoly_untidy %>% rename_cols_CARpoly_untidy() %>%
+                                    delete_cols_CARpoly_untidy()
+  
+
+# categorize as new or old or neither in planted soy age (so far only have it for cell scale)
+cell_tidy <- cell_tidy %>% cell_categorize_soy_age()
+cell_untidy <- cell_untidy %>% cell_categorize_soy_age()
+
+# add year_index and year_factor
+cell_tidy$year_index <- cell_tidy$year - 2003
+cell_untidy$year_index <- cell_untidy$year - 2003
+muni_tidy$year_index <- muni_tidy$year - 2003
+muni_untidy$year_index <- muni_untidy$year - 2003
+CARpoly_tidy$year_index <- CARpoly_tidy$year - 2003
+CARpoly_untidy$year_index <- CARpoly_untidy$year - 2003
+
+cell_tidy$year_factor <- cell_tidy$year %>% as.factor()
+cell_untidy$year_factor <- cell_untidy$year %>% as.factor()
+muni_tidy$year_factor <- muni_tidy$year %>% as.factor()
+muni_untidy$year_factor <- muni_untidy$year %>% as.factor()
+CARpoly_tidy$year_factor <- CARpoly_tidy$year %>% as.factor()
+CARpoly_untidy$year_factor <- CARpoly_untidy$year %>% as.factor()
+
+# use muni_code as factor
+cell_tidy$Muni_code_factor <- cell_tidy$Muni_code %>% as.factor()
+cell_untidy$Muni_code_factor <- cell_untidy$Muni_code %>% as.factor()
+CARpoly_tidy$Muni_code_factor <- CARpoly_tidy$Muni_code %>% as.factor()
+CARpoly_untidy$Muni_code_factor <- CARpoly_untidy$Muni_code %>% as.factor()
+
+# choose munis that were planted in 2014 and 2004, merge them 
+#munis_2014 <- muni_tidy[muni_tidy$year == "2014", c("total_planted_area_km2", "Muni_code")]
+#munis_2004 <- muni_tidy[muni_tidy$Muni_code %in% munis_2014$Muni_code & 
+#                          muni_tidy$year == "2004", c("total_planted_area_km2", "Muni_code")]
+#munis_2014 <- munis_2014 %>% rename(area_2014 = total_planted_area_km2)
+#munis_2004 <- munis_2004 %>% rename(area_2004 = total_planted_area_km2)
+#munis_merged <- merge(munis_2014, munis_2004, by = "Muni_code") %>% unique()
+#soy_age <- rep("neither", length(munis_merged$Muni_code))
+```
+
+## modeling functions
+
+```{r}
+
+# list of numeric x variable names, to be used in multicollinearity test
+numeric.x.var.names <- c("onset", "latitude", "longitude", "onset_historicalRange", "year", "year_index")
+
+# do linear model
+# NEEDS year fixed effect, spatial fixed effect, FE vs ME, spatial autocorrelation handling
+do_lm <- function(data, y.var,  spatial.auto.model, x.vars,
+                  crop.intensity, mask.soy.area) {
+  # options:
+  # x.vars = vector of predictors, names of variables are in quotes, and interactions as will be written in the lm formula, e.g. onset:latitude
+  # crop.intensity = "none", "DC", "SC"
+  # spatial.fe.scale = "none", "regions.4", "municipality", "grid.1deg", "geo.weighted"
+  # spatial.auto.model = "none", "spatial.lag", "spatial.error"
+  # interaction.pairs = 
+  # mask.soy.area = TRUE or FALSE, if TRUE take out rows with total soy area below min_soy_area
+  
+  # subset the data  --------------------------------------------------------------------------------------------------------
+  # get only the desired cropping intensity
+  data.subset <- if(crop.intensity == "none") {
+    data
+  } else {
+    data[data$intensity == crop.intensity,]
+  }
+  
+  # get rid of observations with low soy area
+  data.subset <- if(mask.soy.area) {
+    data.subset[data.subset$total_planted_area_km2 >= min_soy_area,]
+  }
+  
+  # define the formula ------------------------------------------------------------------------------------------------------
+  # define the basic formula
+  formula.string <- paste(y.var, paste(x.vars, collapse = " + "), sep = " ~ ")
+  
+  f <- as.formula(formula.string)
+
+  # do the model -------------------------------------------------------------------------------------------------------------
+  # evaluate model. note, simpler alternative: model <- lm(f, data = data.subset)
+  model <- eval(bquote(   lm(.(f), data = data.subset)   ))
+  
+  return(model)
+}
+
+
+# given an initial model, step through potential new predictors and pick the best one. 
+add_predictor_stepwise <- function(data, initial.predictors, y.var, spatial.auto.model,
+                                   new.predictors, crop.intensity, mask.soy.area) {
+  
+  # given an initial set of predictors, add another one based on adj R2
+  # notes:
+  # the data determines the observation scale
+  # interactions to explore are in new.predictors
+  # spatial FE scale is determined in the initial.predictors and interaction terms
+  
+  # calculate adj R2 of initial model
+  initial_model <- do_lm(data = data, 
+              y.var = y.var, 
+              x.vars = initial.predictors, 
+              spatial.auto.model = spatial.auto.model,  
+              crop.intensity = crop.intensity,
+              mask.soy.area = mask.soy.area)
+  
+  initial_adjR2 <- summary(initial_model)$adj.r.squared
+  
+  # initialize 'best' new predictor and best adj_R2
+  best_new_predictor <- "none"
+  current_best_adjR2 <- initial_adjR2
+  
+  # initialize vector to store adj R2
+  new_adjR2s <- c(initial_adjR2)
+  
+  # loop through potential new predictors
+  for (predictor in new.predictors) {
+    
+    # calculate new adjR2 and save it
+    new_model <- do_lm(data = data, 
+              y.var = y.var, 
+              x.vars = c(initial.predictors, predictor), 
+              spatial.auto.model = spatial.auto.model,  
+              crop.intensity = crop.intensity,
+              mask.soy.area = mask.soy.area)
+    
+    new_adjR2 <- summary(new_model)$adj.r.squared
+    new_adjR2s <- c(new_adjR2s, new_adjR2)
+    
+    # if new_adjR2 is better, update the new_best_predictor
+    if (new_adjR2 > current_best_adjR2) {
+      current_best_adjR2 <- new_adjR2
+      best_new_predictor <- predictor
+    }
+  }
+  
+  # return best predictor, its adjR2, and the list of other predictors' R2
+  all_adjR2 <- data.frame(model = c("initial", new.predictors), adjR2 = new_adjR2s)
+  
+  return(list(new_predictor = best_new_predictor, 
+              new_adjR2 = current_best_adjR2,  
+              adjR2_table = all_adjR2))
+}
+
+# runs add_predictor_stepwise to build the final model
+produce_model_stepwise <- function(data, initial.predictors, y.var, spatial.auto.model,
+                                   new.predictors, crop.intensity, mask.soy.area, max.predictors) {
+  # notes
+  # max.predictors = the max allowed number of predictors in the model
+  
+  model_finalized <- FALSE
+  iterations <- 0
+  
+  while (!model_finalized & iterations <= 10) {
+    
+    iterations <- iterations + 1
+    
+    # add a new predictor, save results
+    result <- add_predictor_stepwise(data, initial.predictors, y.var, spatial.auto.model,
+                       new.predictors, crop.intensity, mask.soy.area)
+    
+    new_predictor <- result$new_predictor
+    new_adjR2_table <- result$adjR2_table
+    new_adjR2 <- result$new_adjR2
+
+    print(new_adjR2_table)
+    
+    # check if the model returned 'none' or the max.predictors was reached; if so, model is finalized
+    # if model is finalized, return the model
+    if (new_predictor == "none" | length(initial.predictors) >= max.predictors) { 
+      model_finalized <- TRUE
+      
+      final_predictors <- initial.predictors
+      final_adjR2 <- new_adjR2
+      
+      # run the final model to return the lm output
+      final_model <- do_lm(data = data, 
+              y.var = y.var, 
+              x.vars = final_predictors, 
+              spatial.auto.model = spatial.auto.model,  
+              crop.intensity = crop.intensity,
+              mask.soy.area = mask.soy.area)
+      
+    }
+    
+    # if model isn't done adding predictors, update initial.predictors for the new iteration
+    initial.predictors <- c(initial.predictors, new_predictor)
+    
+  }
+  
+  # return
+  return(list(final_model = final_model,
+              final_predictors = final_predictors,
+              final_adjR2 = final_adjR2))
+}
+
+evaluate_model <- function(lm_results, test.x.vars, orig_data, title) {
+  
+  print(title)
+  print(summary(lm_results))
+  plot(lm_results, which = c(1,2), main = title) # test error is homoscedastic, zero mean, normal
+  
+  # test pearson's correlation for numeric variables used
+  df <- orig_data %>% subset(select = test.x.vars[test.x.vars %in% numeric.x.var.names])
+  test.corr <- cor(df)
+  
+  print(c('predictor correlation matrix', title))
+  print(test.corr)
+}
+
+
+
+
+```
+
+## building a model stepwise automated
+
+```{r}
+# remove variables
+rm(data)
+rm(initial.predictors)
+rm(y.var)
+rm(spatial.auto.model)
+rm(new.predictors)
+rm(crop.intensity)
+rm(mask.soy.area)
+
+# test produce_model_stepwise
+data <- muni_tidy
+initial.predictors <- c("onset", "intensity")
+y.var <- "plant_median"
+spatial.auto.model <- "none"
+new.predictors <- c("latitude", "longitude", "region", # for spatial effects
+                     "year_factor", # for time effects
+                    "onset_historicalRange",  # other predictors
+                    "onset:latitude", "onset:longitude", "onset:region", # interactions: for spatial effects
+                    "onset:year_factor", # interactions: for time effects
+                    "onset:intensity") # interactions: other predictors
+crop.intensity <- "none"
+mask.soy.area <- TRUE
+
+
+model <- produce_model_stepwise(data, initial.predictors, y.var, spatial.auto.model,
+                       new.predictors, crop.intensity, mask.soy.area, 6)
+evaluate_model(model$final_model, model$final_predictors, data, "output from produce_model_stepwise")
+
+
+```
+
+## spatial studies: first, check residual autocorrelation in basic OLS (for all years)
+
+```{r}
+# do basic OLS model and see if residuals are autocorrelated ----------------------------
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na %>%
+                              mutate(year_factor = as.factor(year))
+     
+
+model_ols <- lm(plant ~ onset + intensity + lat + year_index + onset:intensity, data=cell_sf_tidy)
+summary(model_ols)
+
+cell_sf_tidy$residuals <- residuals(model_ols)
+
+#ggplot(cell_sf_tidy) +
+#  geom_sf(aes(fill = residuals)) +
+#  scale_fill_viridis() +
+#  ggtitle("Residuals for basic OLS") +
+#  theme_bw()
+
+
+# see if basic OLS residuals are spatially autocorrelated with scatterplot -------------------------
+
+nb <- poly2nb(cell_sf_tidy)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy$residuals[x]))
+cor(cell_sf_tidy$residuals, resnb)
+plot(cell_sf_tidy$residuals, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = "Basic OLS, all years")
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_basic_ols <- moran.mc(cell_sf_tidy$residuals, lw, 999, zero.policy = TRUE)
+print('moran with basic ols, all years')
+print(moran_basic_ols)
+
+# see if basic OLS residuals are temporally autocorrelated --------------------------------------
+
+# create observation data frame, for DC only. 
+# need to rename cell_ID so the same cell_ID can correspond to multiple years
+DC_cell <- cell_sf_tidy[cell_sf_tidy$intensity == "DC",] 
+
+# filter out all cells where there isn't data for all years
+st_geometry(DC_cell) <- NULL
+DC_cell <- DC_cell[complete.cases(DC_cell),]
+cells_list <- list()
+i <- 1
+for (year in 2004:2014) {
+  cells_in_year <- DC_cell[DC_cell$year == year,]
+  cells_list[[i]] <- cells_in_year$label
+  i <- i + 1
+}
+full_data_cells <- Reduce(intersect, cells_list)
+DC_cell <- DC_cell[DC_cell$label %in% full_data_cells, ]
+
+# create observation data frame, for SC only. 
+# need to rename cell_ID so the same cell_ID can correspond to multiple years
+SC_cell <- cell_sf_tidy[cell_sf_tidy$intensity == "SC",] 
+
+# filter out all cells where there isn't data for all years
+st_geometry(SC_cell) <- NULL
+SC_cell <- SC_cell[complete.cases(SC_cell),]
+cells_list <- list()
+i <- 1
+for (year in 2004:2014) {
+  cells_in_year <- SC_cell[SC_cell$year == year,]
+  cells_list[[i]] <- cells_in_year$label
+  i <- i + 1
+}
+full_data_cells <- Reduce(intersect, cells_list)
+SC_cell <- SC_cell[SC_cell$label %in% full_data_cells, ]
+
+
+DC_nested_cell <- group_by(data.frame(DC_cell), label) %>% nest()
+SC_nested_cell <- group_by(data.frame(SC_cell), label) %>% nest()
+
+dwtest_one_cell <- function(data) {
+  dwtest(residuals ~ 1, data = data)
+}
+
+DC_cell <- DC_nested_cell %>%
+  mutate(dwtest = map(data, dwtest_one_cell)) %>%
+  mutate(test_df = map(dwtest, tidy)) %>%
+  unnest(test_df)
+
+SC_cell <- SC_nested_cell %>%
+  mutate(dwtest = map(data, dwtest_one_cell)) %>%
+  mutate(test_df = map(dwtest, tidy)) %>%
+  unnest(test_df)
+
+# calculate proportion of p values below 5% significance, with Bonferroni correction
+
+DC_percent_auto <- mean(DC_cell$p.value < 0.05/nrow(DC_cell)) * 100
+SC_percent_auto <- mean(SC_cell$p.value < 0.05/nrow(SC_cell)) * 100
+
+print(DC_percent_auto)
+print(SC_percent_auto)
+
+
+```
+
+
+## spatial studies: check residual autocorrelation in basic OLS for one year
+
+```{r}
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# test basic OLS for one year only (to be compared to spatial lag and spatial error) ----------------------------
+year_oi <- 2014
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+model_ols <- lm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year)
+summary(model_ols)
+
+print(c('median onset', median(cell_sf_tidy_year$onset)))
+
+cell_sf_tidy_year$residuals <- residuals(model_ols)
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = residuals)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Residuals for basic OLS,", year_oi)) +
+  theme_bw()
+
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals[x]))
+#plot(cell_sf_tidy_year$residuals, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Basic OLS,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_basic_ols <- moran.mc(cell_sf_tidy_year$residuals, lw, 999, zero.policy = TRUE)
+print('moran with basic ols, one year')
+print(moran_basic_ols)
+
+# plot actual plant and onset to check if the correct data is being used
+# ggplot(cell_sf_tidy_year) +
+#   geom_sf(aes(fill = plant)) +
+#   scale_fill_viridis() +
+#   ggtitle(paste("Plant date", year_oi)) +
+#   theme_bw()
+# 
+# ggplot(cell_sf_tidy_year) +
+#   geom_sf(aes(fill = onset)) +
+#   scale_fill_viridis() +
+#   ggtitle(paste("Onset date", year_oi)) +
+#   theme_bw()
+
+```
+
+## spatial studies: second, fit spatial lag and error models (for one year)
+source: https://rspatial.org/analysis/7-spregression.html
+
+```{r}
+year_oi <- 2014
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+
+nb <- poly2nb(cell_sf_tidy_year)
+lw <- nb2listw(nb, zero.policy = TRUE)
+
+# spatial lag model ---------------------------------------------------------------------
+model_lag = lagsarlm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_lag)
+
+cell_sf_tidy_year$residuals_lag <- residuals(model_lag)
+
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals_lag[x]))
+#plot(cell_sf_tidy_year$residuals_lag, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial lag,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_lag <- moran.mc(cell_sf_tidy_year$residuals_lag, lw, 999, zero.policy = TRUE)
+moran_lag
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = residuals_lag)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Residuals for spatial lag model,", year_oi)) +
+  theme_bw()
+
+# spatial error model ---------------------------------------------------------------------
+model_error = errorsarlm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_error)
+
+cell_sf_tidy_year$residuals_error <- residuals(model_error)
+
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals_error[x]))
+#plot(cell_sf_tidy_year$residuals_error, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial error,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_error <- moran.mc(cell_sf_tidy_year$residuals_error, lw, 999, zero.policy = TRUE)
+moran_error
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = residuals_error)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Residuals for spatial error model,", year_oi)) +
+  theme_bw()
+
+```
+
+
+## temporal basis functions with SpatioTemporal
+## NOTE, DIDN'T INCLUDE ONSET, INTENSITY, ONSET:INTENSITY AS COVARIATE HERE
+
+```{r}
+
+library(SpatioTemporal)
+
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+
+# create observation data frame, for DC only. 
+# need to rename cell_ID so the same cell_ID can correspond to multiple years
+cell_tidy_DC <- cell_tidy[cell_tidy$intensity == "DC",] 
+cell_tidy_DC$cell_ID <- sapply(as.character(cell_tidy_DC$cell_ID), clean_cell_ID)
+
+# filter out all cells where there isn't data for all years
+cell_tidy_DC <- cell_tidy_DC[complete.cases(cell_tidy_DC),]
+cells_list <- list()
+i <- 1
+for (year in 2004:2014) {
+  cells_in_year <- cell_tidy_DC[cell_tidy_DC$year == year,]
+  cells_list[[i]] <- cells_in_year$cell_ID
+  i <- i + 1
+}
+full_data_cells <- Reduce(intersect, cells_list)
+cell_tidy_DC <- cell_tidy_DC[cell_tidy_DC$cell_ID %in% full_data_cells, ]
+
+cell_for_STdata <- cell_tidy_DC %>%
+                        transmute(ID = cell_ID,
+                                  obs = plant_median,
+                                  date = year)
+
+
+# create covariate data frame. for now, just use lat and lon
+covars <- dplyr::select(cell_tidy_DC, cell_ID, latitude, longitude) %>%
+              unique() %>%
+              dplyr::rename(ID = cell_ID) #split(cell_sf_tidy, cell_sf_tidy$year)
+
+STdata <- createSTdata(cell_for_STdata, covars = covars)
+
+#plot(STdata, "acf", ID = "+4340+4285")
+
+# temporal basis functions
+STdata <- updateTrend(STdata, n.basis = 2)
+
+#plot(STdata, "acf", ID = "+4340+4285")
+
+beta.lm <- estimateBetaFields(STdata) # these are the alpha's in the textbook
+
+beta.lm$beta <- data.frame(beta.lm$beta)
+beta.lm$beta.sd <- data.frame(beta.lm$beta.sd)
+beta.lm$beta$ID <- row.names(beta.lm$beta)
+BETA <- cbind(beta.lm$beta, beta.lm$beta.sd)
+colnames(BETA) <- c("alpha1", "alpha2", "alpha3", "ID",
+"alpha1_CI", "alpha2_CI", "alpha3_CI")
+BETA <- left_join(BETA, covars, by = "ID")
+
+ggplot(BETA) + geom_point(aes(x = latitude, y = alpha1)) +
+  geom_errorbar(aes(x = latitude,
+  ymin = alpha1 - 1.96*alpha1_CI,
+  ymax = alpha1 + 1.96*alpha1_CI)) +
+  ylab(expression(alpha[1](s))) +
+  xlab("lat (deg)") + theme_bw()
+
+cov.beta <- list(covf = "exp", nugget = FALSE)
+
+cov.nu <- list(covf = "exp",
+  nugget = ~1,
+  random.effect = FALSE) # No random mean for each nu
+
+# create the STmodel
+locations <- list(coords = c("longitude", "latitude"))
+LUR <- list(~latitude, ~latitude, ~1) # lat trend for phi1 and phi2 only
+STmodel <- createSTmodel(STdata, # data
+  LUR = LUR, # spatial covariates
+  cov.beta = cov.beta, # cov. of alphas
+  cov.nu = cov.nu, # cov. of nu
+  locations = locations) # coord. names
+
+x.init <- matrix(3, 9, 1)
+rownames(x.init) <- loglikeSTnames(STmodel, all = FALSE)
+SpatioTemporalfit1 <- estimate(STmodel, x.init)
+
+x.final <- coef(SpatioTemporalfit1, pars = "cov")$par
+
+# see Lab 4.3 for prediction
+```
+
+## temporal basis functions with SpatioTemporal
+## NOTE, TRY TO INCLUDE ONSET AS COVARIATE HERE (BUT NOT INTENSITY, ONSET:INTENSITY. include intensity as type field in covar? )
+
+```{r}
+
+library(SpatioTemporal)
+
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+
+# create observation data frame, for DC only. 
+# need to rename cell_ID so the same cell_ID can correspond to multiple years
+
+cell_tidy_DC <- cell_tidy[cell_tidy$intensity == "DC",] 
+cell_tidy_DC$cell_ID <- sapply(as.character(cell_tidy_DC$cell_ID), clean_cell_ID)
+
+# filter out all cells where there isn't data for all years
+cell_tidy_DC <- cell_tidy_DC[complete.cases(cell_tidy_DC),]
+cells_list <- list()
+i <- 1
+for (year in 2004:2014) {
+  cells_in_year <- cell_tidy_DC[cell_tidy_DC$year == year,]
+  cells_list[[i]] <- cells_in_year$cell_ID
+  i <- i + 1
+}
+full_data_cells <- Reduce(intersect, cells_list)
+cell_tidy_DC <- cell_tidy_DC[cell_tidy_DC$cell_ID %in% full_data_cells, ]
+
+# for rownames (add Aug 1 to the years to turn into dates)
+date_rownames <- sapply(2004:2014, paste0, '-08-01')
+
+cell_for_STdata <- cell_tidy_DC %>%
+                        transmute(ID = cell_ID,
+                                  obs = plant_median,
+                                  date = year) %>%
+                        spread(ID, obs) %>%
+                        dplyr::select(-c(date)) %>%
+                        as.matrix()
+rownames(cell_for_STdata) <- date_rownames
+
+
+# create covariate data frame. for now, just use lat and lon
+covars <- dplyr::select(cell_tidy_DC, cell_ID, latitude, longitude) %>%
+              unique() %>%
+              dplyr::rename(ID = cell_ID) #split(cell_sf_tidy, cell_sf_tidy$year)
+
+spatiotemporal_vars <- cell_tidy_DC %>%
+                        transmute(ID = cell_ID,
+                                  obs = onset,
+                                  date = year) %>%
+                        spread(ID, obs) %>%
+                        dplyr::select(-c(date)) %>%
+                        as.matrix()
+rownames(spatiotemporal_vars) <- date_rownames
+
+# SpatioTemporal will be a 3D array, where the third dimension corresponds each spatiotemporal variable
+STdata <- createSTdata(cell_for_STdata, covars = covars, 
+                      SpatioTemporal = list(onset = spatiotemporal_vars), n.basis = 2)
+
+# summary of the STdata: with print(STdata), or plot(STdata, "loc")
+
+# temporal basis functions
+#STdata <- updateTrend(STdata, n.basis = 2)
+
+# to create STmodel, need to specify:
+# (1) spatial covariance model for beta and nu fields
+# (2) define which covariates to use for each of the beta fields
+# (3) specify any spatiotemporal covariates
+
+
+# (1) spatial covariance model for beta and nu fields
+
+cov.beta <- list(covf = "exp", nugget = FALSE)
+cov.nu <- list(covf = "exp", nugget = ~1, random.effect = FALSE) # No random mean for each nu
+
+# (2) in LUR, put in variables used to model the beta), beta1, and beta3 fields
+LUR <- list(~latitude+longitude, ~latitude+longitude, ~1) 
+
+# link variable names in STdata$covars dat aframe to locations
+locations <- list(coords = c("longitude", "latitude")) # coords are used to compute distances between observation locations, can also include long.lat
+
+
+# create the STmodel
+
+STmodel <- createSTmodel(STdata, # data
+                         ST = "onset", # specify spatiotemporal variables
+                          LUR = LUR, # spatial covariates
+                          cov.beta = cov.beta, # cov. of alphas
+                          cov.nu = cov.nu, # cov. of nu
+                          locations = locations) # coord. names
+
+# can do print(STmodel) to see summary
+
+# since the regression coefficients are estimated by profile likelihood, only the covariance parameters need starting values specified. once these are optimized, the maximum-likelihood estimate of the regression coefficients can be inferred using generalized least squares
+# to see the paramters we're specifying the starting points for, use loglikeSTnames()
+model.dim <- loglikeSTdim(STmodel)
+x.init <- matrix(3,9,1) #cbind(matrix(3,9,1), matrix(2, 9, 1)) # can have multiple starting points for optimization, see the SpatioTemporal tutorial
+#rownames(x.init) <- loglikeSTnames(STmodel, all = FALSE)
+SpatioTemporalfit1 <- estimate(STmodel, x.init)
+
+# can do print(SpatioTemporalfit1) to see summary, including converged parameter values from two starint points, and names(SpatialTemporalfit1) to see output included
+# output:
+# res.all is a list with the optimization results for each starting point, and res.best contains the best optimization results
+# within res.all or res.best, 
+# par = the estimated log-covariance parameters
+# value = value of the log-likelihood
+# par.cov = estimates, estimated standard errors and t-statistics for the log-covariance parameters
+# par.all = same summary as par.cov, but for all teh parameters of the model. the regression coefficients are computed using generalized least squares
+
+print(SpatioTemporalfit1$res.best$par.all)
+# see Lab 4.3 or SpatioTemporal tutorial for prediction
+
+# cross validation
+Ind.cv <- createCV(STmodel, groups=5, min.dist=.1)
+x.init <- coef(SpatioTemporalfit1, pars="cov")[,c("par","init")]
+est.cv <- estimateCV(STmodel, x.init, Ind.cv)
+
+print(coef(est.cv))
+
+pred.cv <- predictCV(STmodel, est.cv, LTA = TRUE)
+
+# to get predictions at observed locations, pred.cv$pred.obs
+
+# analyze residuals
+qqnorm(pred.cv, line = 2)
+scatterPlot(pred.cv, STdata = STmodel, covar = "latitude", type = "res")
+scatterPlot(pred.cv, STdata = STmodel, covar = "longitude", type = "res")
+```
+
+
+
+
+
+## spatial studies: spatially weighted regression (for one year)
+source: 
+http://www.spatialanalysisonline.com/An%20Introduction%20to%20Spatial%20Data%20Analysis%20in%20R.pdf
+
+```{r}
+library(spgwr) # spatially weighted regression
+
+year_oi <- 2014
+
+# need to read in again because we re-save it at the end
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+# filter for a specific year, then turn sf object into SPDF
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+cell_spdf_tidy_year <- as(cell_sf_tidy_year, 'Spatial')
+
+
+#run GWR
+#calculate kernel bandwidth (takes a long time)
+GWRbandwidth <- gwr.sel(plant ~ onset + intensity + lat + onset:intensity, 
+data = cell_spdf_tidy_year, adapt =TRUE)
+
+#run the gwr model
+gwr.model <- gwr(plant ~ onset + intensity + lat + onset:intensity, 
+                        data = cell_spdf_tidy_year, adapt=GWRbandwidth, hatmatrix=TRUE, se.fit=TRUE)
+#print the results of the model
+gwr.model
+
+
+# calculate median onset over the years for each cell, then the deviation from the median in that year
+cell_sf_tidy <- cell_sf_tidy %>%
+    group_by(label) %>%
+    mutate(onset_multiYearMedian = median(onset)) %>% # over all time, but for specific cell
+    mutate(onset_deviation1 = onset - onset_multiYearMedian) %>%
+    ungroup() %>%
+    mutate(onset_overallMedian = median(onset)) %>% # over all space and time
+    mutate(onset_deviation2 = onset - onset_overallMedian)
+
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+
+# third, map the results 
+results <-as.data.frame(gwr.model$SDF)
+gwr.map <- cbind(cell_spdf_tidy_year, as.matrix(results))
+gwr.map$onset_deviation1 <- cell_sf_tidy_year$onset_deviation1 # deviation from multiyear median onset compared to specific cell
+gwr.map$onset_deviation2 <- cell_sf_tidy_year$onset_deviation2 # deviation from multiyear median onset over all space
+
+# as spdf
+gwr.map$onsetCoef_range1 <- gwr.map$onset.1 - 1.96*gwr.map$onset_se
+gwr.map$onsetCoef_range2 <- gwr.map$onset.1 + 1.96*gwr.map$onset_se
+gwr.map$onset_signif <- !(gwr.map$onsetCoef_range1 < 0 & gwr.map$onsetCoef_range2 > 0)
+# get only the cells with statistically significant onset coefficients
+gwr.map.signif <- gwr.map[gwr.map$onset_signif == TRUE,]
+
+# as data frame
+gwr.df <- as.data.frame(gwr.map)
+gwr.df <- gwr.df %>% 
+    mutate(onsetCoef_range1 = onset.1 - 1.96*onset_se) %>%
+    mutate(onsetCoef_range2 = onset.1 + 1.96*onset_se) %>%
+    mutate(onset_signif = !(onsetCoef_range1 < 0 & onsetCoef_range2 > 0))
+# get only rows with statistically significant onset coefficients
+gwr.df.signif <- gwr.df %>% subset(onset_signif == TRUE)
+
+
+# create tmap objects
+# map_localR2 <- tm_shape(gwr.map) + 
+#   tm_fill("localR2", n = 5, style = "quantile") +
+#   tm_layout(title = paste("Local R2,", year_oi), legend.text.size = 0.5, legend.title.size = 1)
+
+# put in only statistically significant coefficients
+map_onset <-   tm_shape(MT_outline) +
+  tm_polygons(alpha = 0) +
+  tm_shape(gwr.map.signif) + 
+  tm_fill("onset.1", breaks = seq(-4, 4)) +
+  tm_layout(title = paste("Onset Coefficient (stat signif),", year_oi), legend.text.size = 0.5, legend.title.size = 1)
+
+
+# map_intensity <- tm_shape(gwr.map) + 
+#   tm_fill("intensitySC", n = 5, style = "quantile") +
+#   tm_layout(title = paste("IntensitySC Coefficient,", year_oi), legend.text.size = 0.5, legend.title.size = 1)
+# 
+# map_latitude <- tm_shape(gwr.map) + 
+#   tm_fill("lat.1", n = 5, style = "quantile") +
+#   tm_layout(title = paste("Latitude Coefficient,", year_oi), legend.text.size = 0.5, legend.title.size = 1)
+
+# map_onset_se <- tm_shape(gwr.map) + 
+#   tm_fill("onset_se", n = 5, style = "quantile") +
+#   tm_layout(title = paste("Onset Coef Std Error,", year_oi), legend.text.size = 0.5, legend.title.size = 1) 
+
+# map_intensity_se <- tm_shape(gwr.map) + 
+#   tm_fill("intensitySC_se", n = 5, style = "quantile") +
+#   tm_layout(title = paste("IntensitySC Coef Std Error,", year_oi), legend.text.size = 0.5, legend.title.size = 1)
+# 
+# map_latitude_se <- tm_shape(gwr.map) + 
+#   tm_fill("lat_se", n = 5, style = "quantile") +
+#   tm_layout(title = paste("Latitude Coef Std Error,", year_oi), legend.text.size = 0.5, legend.title.size = 1)
+# 
+# map_localR2
+
+# map_intensity
+# map_latitude
+
+# map_intensity_se
+# map_latitude_se
+
+onset_deviation1_plot <- ggplot(gwr.df, aes(x = onset_deviation1, y = onset.1, col = onset_signif)) +
+  geom_point(alpha = 0.3) +
+  ggtitle(paste("Stat signif cells in", year_oi)) +
+  xlab("onset deviation from within-cell multiyear median") +
+  ylab("onset coefficient") +
+  geom_smooth(method = "lm") +
+  geom_vline(xintercept = 0) +
+  coord_cartesian(ylim = c(-3, 3), xlim = c(-30, 40)) +
+  theme_bw()
+
+onset_deviation2_plot <- ggplot(gwr.df, aes(x = onset_deviation2, y = onset.1, col = onset_signif)) +
+  geom_point(alpha = 0.3) +
+  ggtitle(paste("Stat signif cells in", year_oi)) +
+  xlab("onset deviation from multiyear, multicell median") +
+  ylab("onset coefficient") +
+  geom_smooth(method = "lm") +
+  geom_vline(xintercept = 0) +
+  coord_cartesian(ylim = c(-3, 3), xlim = c(-50, 40)) +
+  theme_bw()
+
+# print plots
+#print(map_onset)
+#print(map_onset_se)
+#print(onset_deviation2_plot)
+
+percent_pos_onset <- sum(gwr.df.signif$onset_deviation2 > 0)/length(gwr.df.signif$onset_deviation2)
+percent_pos_coef <- sum(gwr.df.signif$onset.1 > 0)/length(gwr.df.signif$onset_deviation2)
+
+print(c('year', year_oi))
+print(c('percent positive onset deviation', percent_pos_onset))
+print(c('percent positive onset coef', percent_pos_coef))
+
+print(map_onset)
+```
+
+## export
+
+```{r}
+# for app.R
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na %>%
+                              mutate(year_factor = as.factor(year))
+saveRDS(as(cell_sf_tidy, 'Spatial'), "./cell_spdf.rds")
+
+# from GWR section
+late_early_onset_years <- data.frame(
+  year = 2004:2014,
+  percent_positive_onset = c(14, 67, 18, 2, 97, 69, 25, 100, 43, 35, 88),
+  percent_positive_coef = c(42, 34, 56, 40, 97, 60, 53, 93, 97, 89, 77)
+)
+
+ggplot(late_early_onset_years, aes(x = percent_positive_onset, y = percent_positive_coef, col = year, label = year)) +
+  geom_point() + 
+  geom_vline(xintercept = 50) +
+  geom_text(aes(label=year),hjust=0, vjust=0) +
+  coord_cartesian(ylim = c(0, 110), xlim = c(0, 110)) +
+  ggtitle("For statistically significant onset coefs from GWR") +
+  xlab("Percent cells with positive onset deviation") +
+  ylab("Percent cells with positive onset coefficient") +
+  theme_bw()
+
+```

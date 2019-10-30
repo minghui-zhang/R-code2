@@ -1,0 +1,347 @@
+---
+title: "Spatial Sampling, then OLS"
+output: html_document
+---
+
+1. Sample cells at 100km distance to skip spatial autocorrelation
+2. Regular OLS
+3. Model evaluation.
+4. Repeat above for consistency
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics) # for rmse
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## functions
+
+```{r}
+# test the models
+test_plots <- function(model, model_name) {
+  
+  plot(model$residuals, main = paste("residual vs index", model_name))
+
+  plot(model$fitted.values, model$residuals, main = paste("fitted values vs residuals", model_name))
+  
+  # normal probability plot
+  qqnorm(model$residuals, pch = 1, frame = FALSE, main = model_name)
+  qqline(model$residuals, col = "steelblue", lwd = 2)
+}
+
+# add cell_ID
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+
+# plot data
+plot_cell_onset <- function(year, cell_data) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = onset)) +
+   scale_fill_viridis() +
+   ggtitle(paste("Onset for spatial sampling", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_residuals <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = residuals)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "residuals for spatial sampling", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_plant <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = plant)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "plant for spatial sampling", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_tempAuto <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = dwi.autocorr.p.value)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "signif temporal autocorrelation for spatial panel", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+```
+
+## sample cells so they're 100 km apart
+
+```{r}
+
+year_oi <- 2008 # for mapping purposes
+# the amount to move the grid left, right, up and down to see impact of different grid locations
+lat_offset <- 0.5 # shift by 0.25 units
+lon_offset <- 0.5
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# order cells so the slowest-changing row is cell_ID
+cell_sf_tidy <- cell_sf_tidy[order(cell_sf_tidy$cell_ID) , ]
+cell_sf_tidy$index <- 1:nrow(cell_sf_tidy) #unique row index to join later
+cell_sp_tidy <- as(cell_sf_tidy, 'Spatial')
+
+#samples <- spsample(MT_outline,  type = "random")
+#samples <- cell_sf_tidy[seq(1, nrow(cell_sf_tidy), by = 11), ] #spsample(x = cell_sp_tidy, n = 20, type = "regular")
+
+# generate regular grid of points
+samplePoints <- makegrid(MT_outline, cellsize = 1.25)
+samplePoints$x1 <- samplePoints$x1 + lon_offset
+samplePoints$x2 <- samplePoints$x2 + lat_offset
+samplePoints <- SpatialPoints(samplePoints, proj4string = CRS(proj4string(MT_outline)))
+
+# sample from grid of points, delete NA's
+samples <- sp::over(samplePoints, cell_sp_tidy, returnList = TRUE) %>%
+              bind_rows()
+samples <- samples[complete.cases(samples),] # data.frame
+samples_polys <- merge(data.frame(index = samples[, "index"]), cell_sf_tidy, by.x = "index", by.y = "index")
+samples_polys <- st_as_sf(samples_polys)
+
+# samples_points were another way of doing the same thing as samples_polys
+samples_points <- st_as_sf(samples, coords = c("lon", "lat"), crs = CRS(proj4string(cell_sp_tidy))) 
+samples_points <- cbind(samples_points, st_coordinates(samples_points)) %>%
+              mutate(lon = X) %>%
+              mutate(lat = Y)
+
+# plot the samples over the full dataset for a given year
+full_year <- subset(cell_sf_tidy, year == year_oi)
+sample_year <- subset(samples_polys, year == year_oi)
+
+ggplot() +
+   geom_sf(data = subset(full_year, intensity == "DC"), color = "gray") +
+   geom_sf(data = subset(sample_year, intensity == "DC"), color = "blue") +
+   ggtitle(paste("Sampled cells, for DC", year_oi)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+
+ggplot() +
+   geom_sf(data = subset(full_year, intensity == "SC"), color = "gray") +
+   geom_sf(data = subset(sample_year, intensity == "SC"), color = "blue") +
+   ggtitle(paste("Sampled cells, for SC", year_oi)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+```
+
+## spatial sampling then OLS
+
+```{r}
+year_oi <- 2008 # this is only for visualization
+
+library(leaflet)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+model = lm(plant ~ onset + year + lat + intensity, data=samples_polys) 
+
+summary(model)
+samples_polys$residuals <- residuals(model)
+samples_polys$fitted.values <- fitted.values(model)
+
+# model evaluation: plant and onset maps (only those used in the actual modeling) --------------------------------------
+print(plot_cell_onset(year_oi, samples_polys))
+print(plot_cell_plant(year_oi, samples_polys, "DC"))
+
+# model evaluation: residual vs fitted value and vs index, and residual qq plot ----------------------------------------
+test_plots(model, "spatial sampled, regular OLS")
+plot(samples_polys$plant, samples_polys$fitted.values, main = "sampled OLS fitted value vs actual value of plant", ylab = "fitted.values")
+abline(h = mean(samples_polys$fitted.values), col = "blue")
+abline(v = mean(samples_polys$plant), col = "blue")
+abline(0,1, col = "gray", lwd = 3)
+
+plot(samples_polys$plant, samples_polys$residuals, main = "plant vs residuals")
+
+# model evaluation: residual map ---------------------------------------------------------------------------------------
+
+print(plot_cell_residuals(year_oi, samples_polys, "DC"))
+
+# model evaluation: calculate R2 ---------------------------------------------------------------------------------------
+
+SST <- sum((samples_polys$plant - mean(samples_polys$plant))^2)
+SSE <- sum((samples_polys$residuals - mean(samples_polys$residuals))^2)
+R2 <- 1 - SSE/SST
+
+print(paste('R2:', R2))
+
+# model evaluation: correlations between plant/onset and explanatory variables---------------
+# print(paste("corr plant-onset", cor(samples_polys$plant, samples_polys$onset)))
+# print(paste("corr plant-lat", cor(samples_polys$plant, samples_polys$lat)))
+# print(paste("corr plant-year", cor(samples_polys$plant, samples_polys$year)))
+# print(paste('sd of fitted. values', sd(samples_polys$fitted.values)))
+plot(samples_polys$onset, samples_polys$residuals, main = "spatial sample, onset vs residual (exogeneity)")
+plot(samples_polys$lat, samples_polys$residuals, main = "spatial sample, latitude vs residual (exogeneity)")
+
+plot(samples_polys$year, samples_polys$residuals, main = "spatial sample, latitude vs residual (exogeneity)") 
+abline(h = 0)
+ 
+# multicollinearity: correlation between predictors
+predictors <- samples_polys[,c("lat", "onset", "year")]
+st_geometry(predictors) <- NULL
+print(cor(predictors))
+
+# model evaluation: see if basic OLS residuals are spatially autocorrelated with scatterplot -------------------------
+# need 'one layer': one year, one intensity
+to_autocorrelation <- samples_polys[samples_polys$year == year_oi & samples_polys$intensity == "DC", ]
+to_autocorrelation_sp <- as(to_autocorrelation, "Spatial")
+st_geometry(to_autocorrelation) <- NULL # turn to_autocorrelation into data frame
+centroids <- coordinates(to_autocorrelation_sp)
+to_autocorrelation_points <- SpatialPointsDataFrame(coords = centroids, data = to_autocorrelation)
+# nb <- poly2nb(to_autocorrelation) #IF SAMPLES IS POLYGON DATA
+nb<-knn2nb(knearneigh(to_autocorrelation_points)) # IF SAMPLES IS POINT DATA
+# #resnb <- sapply(nb, function(x) mean(cell_sf_tidy$residuals[x]))
+# #plot(cell_sf_tidy$residuals, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = "Basic OLS, all years")
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, 999, zero.policy = TRUE)
+print('moran I for residuals')
+print(moran_residual)
+moran_onset <- moran.mc(to_autocorrelation_points$onset, lw, 999, zero.policy = TRUE)
+print('moran I of onset with basic ols')
+print(moran_onset)
+moran_plant <- moran.mc(to_autocorrelation_points$plant, lw, 999, zero.policy = TRUE)
+print('moran I of plant')
+print(moran_plant)
+
+# percent of total data that's used in regression
+print(paste('percent total data used:', 100*nrow(samples_polys)/nrow(cell_sf_tidy)))
+
+```
+
+## evaluate predictions
+
+```{r}
+
+# runs the model with options to eliminate a year
+run_model <- function(full_data, year_to_elim, elim_year) {
+  
+  # separate training and test data
+  if (elim_year) {
+    train_data <- full_data[full_data$year != year_to_elim,]
+    test_data <- full_data[full_data$year == year_to_elim,]
+  }
+  else {
+    train_data <- full_data
+    test_data <- full_data
+  }
+  
+  model = lm(plant ~ onset + year + lat + intensity, data=train_data) 
+  model_intercept = lm(plant ~ 1, data=train_data)
+    
+  # extract onset coef and R2 from model
+  onset_coef <- model$coefficients['onset']
+  train_data$residuals <- residuals(model)
+  SST <- sum((train_data$plant - mean(train_data$plant))^2)
+  SSE <- sum((train_data$residuals - mean(train_data$residuals))^2)
+  R2 <- 1 - SSE/SST
+  
+  # prediction
+  prediction <- predict(model, test_data)
+  error <- rmse(prediction, test_data$plant)
+  
+  prediction_intercept <- predict(model_intercept, test_data)
+  error_intercept <- rmse(prediction_intercept, test_data$plant)
+  
+  diff_error <- error_intercept - error
+  
+  # output
+  output <- c(as.integer(year_to_elim), onset_coef, R2, error, diff_error)
+  names(output) <- c("eliminated_year", "onset", "R2", "RMSE", "RMSE_improvement")
+  return(output)
+}
+
+prediction_results <- data.frame()
+
+for (year in 2004:2014) {
+  
+  result <- run_model(samples_polys, year, TRUE)
+  prediction_results <- rbind(prediction_results, result)
+}
+
+names(prediction_results) <- names(result)
+
+plot(prediction_results$eliminated_year, prediction_results$RMSE, 
+     ylab = "RMSE", xlab = "eliminated year", ylim = c(5, 25), type = "l", main = "Prediction RMSE, spatial sampling")
+
+plot(prediction_results$eliminated_year, prediction_results$RMSE_improvement, 
+     ylab = "RMSE", xlab = "eliminated year", ylim = c(0, 10), type = "l", main = "Prediction RMSE improvement over intercept, spatial sampling")
+
+plot(prediction_results$eliminated_year, prediction_results$onset, type = "l", col = "red", ylab = "coef or R2", xlab = "eliminated year", ylim = c(0.1, 0.7), main = "Prediction onset and R2, spatial sampling")
+lines(prediction_results$eliminated_year, prediction_results$R2, col = "blue")
+legend(2004, 0.65, legend = c("onset coef", "R2"), col = c("red", "blue"), lty= c(1,1))
+
+```

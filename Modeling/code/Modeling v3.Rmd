@@ -1,0 +1,258 @@
+---
+title: "Exploration"
+output: html_document
+---
+
+Spatial error and spatial lag models for all years
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+#cell_shp <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+
+```
+
+## constants
+
+```{r}
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## rename and delete the columns (only needed for median)
+
+```{r}
+
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+# add cell_ID
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+```
+
+## tidy the data and categorize the numeric variables
+
+```{r}
+
+# create tidy datasets
+cell_tidy <- tidy_combine_cell(median_cell, percentile5_cell, percentile95_cell)
+
+# categorize numeric variables
+cell_tidy <- categorize_vars_cell_tidy(cell_tidy)
+cell_untidy <- categorize_vars_cell_untidy(median_cell)
+
+# categorize as new or old or neither in planted soy age (so far only have it for cell scale)
+cell_tidy <- cell_tidy %>% cell_categorize_soy_age()
+cell_untidy <- cell_untidy %>% cell_categorize_soy_age()
+
+# add year_index and year_factor
+cell_tidy$year_index <- cell_tidy$year - 2003
+cell_untidy$year_index <- cell_untidy$year - 2003
+
+cell_tidy$year_factor <- cell_tidy$year %>% as.factor()
+cell_untidy$year_factor <- cell_untidy$year %>% as.factor()
+
+# use muni_code as factor
+cell_tidy$Muni_code_factor <- cell_tidy$Muni_code %>% as.factor()
+cell_untidy$Muni_code_factor <- cell_untidy$Muni_code %>% as.factor()
+
+```
+
+## spatial studies: second, fit spatial lag and error models (for one year)
+source: https://rspatial.org/analysis/7-spregression.html
+
+```{r}
+year_oi <- 2014
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+
+nb <- poly2nb(cell_sf_tidy_year)
+lw <- nb2listw(nb, zero.policy = TRUE)
+
+# spatial lag model ---------------------------------------------------------------------
+model_lag = lagsarlm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_lag)
+
+cell_sf_tidy_year$residuals_lag <- residuals(model_lag)
+
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals_lag[x]))
+#plot(cell_sf_tidy_year$residuals_lag, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial lag,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_lag <- moran.mc(cell_sf_tidy_year$residuals_lag, lw, 999, zero.policy = TRUE)
+moran_lag
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = residuals_lag)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Residuals for spatial lag model,", year_oi)) +
+  theme_bw()
+
+# spatial error model ---------------------------------------------------------------------
+model_error = errorsarlm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_error)
+
+cell_sf_tidy_year$residuals_error <- residuals(model_error)
+
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals_error[x]))
+#plot(cell_sf_tidy_year$residuals_error, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial error,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_error <- moran.mc(cell_sf_tidy_year$residuals_error, lw, 999, zero.policy = TRUE)
+moran_error
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = residuals_error)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Residuals for spatial error model,", year_oi)) +
+  theme_bw()
+
+```
+
+## spatial panel model with all years
+
+```{r}
+
+library(splm)
+library(plm)
+
+# filter for only DC cells
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy_DC <- cell_sf_tidy %>% 
+                    filter(intensity == "DC")
+
+# filter out all cells where there isn't data for all years
+cells_list <- list()
+i <- 1
+for (year in 2004:2014) {
+  cells_in_year <- cell_sf_tidy_DC[cell_sf_tidy_DC$year == year,]
+  cells_list[[i]] <- cells_in_year$cell_ID
+  i <- i + 1
+}
+full_data_cells <- Reduce(base::intersect, cells_list)
+cell_sf_tidy_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$cell_ID %in% full_data_cells, ]
+
+
+# spatial Durbin model with region and time (twoways) fixed effect
+
+#spatial weights matrix, convert to weights list object
+#W5EX.lw = mat2listw(W5EX, style="W")
+#class(W5EX.lw) # listw, nb
+
+cell_sf_tidy_DC_year <- cell_sf_tidy_DC[cell_sf_tidy_DC$year == 2014,]
+nb <- poly2nb(cell_sf_tidy_DC_year) # only for ONE year
+lw <- nb2listw(nb, zero.policy = TRUE) # listw object
+
+# get only the regions with links, redo neighbors calc, filter the data for all years accordingly
+cell_sf_tidy_DC_year <- cell_sf_tidy_DC_year[card(nb) != 0,]
+nb <- poly2nb(cell_sf_tidy_DC_year) # only for ONE year
+lw <- nb2listw(nb, zero.policy = TRUE) # listw object
+linked_cells <- cell_sf_tidy_DC_year$cell_ID
+cell_sf_tidy_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$cell_ID %in% linked_cells, ]
+
+
+# convert data.frame to pdata.frame object to apply as panel data (use package plm)
+cell_tidy_DC_pdf <- pdata.frame(cell_sf_tidy_DC, c("cell_ID","year"))
+
+
+
+# data must be stacked first by time period and then by region
+# first index "year", second index "region" - i.e. have a column for region, then column for year
+cell_tidy_DC_pdfo <- cell_tidy_DC_pdf[order(cell_tidy_DC_pdf$year) , ] # pdata.frame
+
+# spml is the general wrapper function and the argument model controls the specification
+# model = "within" for fixed effects; "random" for random effects, "pooling" for no effects
+# spatial structure is specified by combining logical arguments lag (if TRUE, adds spatial autoregressive term in the dependent variable) and spatial.error (takes three values: "b", "kkp", or "none" for no spatial error correlation")
+#cell_DC_FEDurbin = spml(plant ~ onset + lat + year, data=cell_tidy_DC_pdfo, listw=lw, model="within", effect="twoways", lag=TRUE, spatial.error="none")
+
+cell_DC_model1 = spml(plant ~ onset + lat + year  +1, data=cell_tidy_DC_pdfo, listw=lw, 
+                    model = "random", lag = TRUE, spatial.error = "b")
+
+# this doesn't work, object lengths differ
+
+cell_DC_model2 = spml(plant ~ onset, data=cell_tidy_DC_pdfo, listw=lw, effect = "individual", model="within", spatial.error="none", lag = T)
+
+
+cell_DC_model3 = spml(plant ~ onset + lat + year, data=cell_tidy_DC_pdfo, listw=lw, 
+                      model="pooling", effect = "twoways", lag=TRUE, spatial.error="kkp")
+
+
+summary(cell_DC_model3)
+
+# test the models
+test_plots <- function(model, model_name) {
+  
+  plot(cell_DC_model$residuals, main = paste("residual vs index", model_name))
+  # fitted values vs residuals
+  plot(cell_DC_model3$fitted.values, cell_DC_model3$residuals, main = paste("fitted values vs residuals", model_name))
+  
+  # normal probability plot
+  qqnorm(cell_DC_model3$residuals, pch = 1, frame = FALSE, main = model_name)
+  qqline(cell_DC_model3$residuals, col = "steelblue", lwd = 2)
+}
+
+test_plots(cell_DC_model1, "model1")
+test_plots(cell_DC_model3, "model3")
+
+```
+
+
+## export
+
+```{r}
+# for app.R
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na %>%
+                              mutate(year_factor = as.factor(year))
+saveRDS(as(cell_sf_tidy, 'Spatial'), "./cell_spdf.rds")
+```

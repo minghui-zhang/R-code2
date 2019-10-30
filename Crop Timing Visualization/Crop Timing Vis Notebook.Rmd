@@ -1,0 +1,101 @@
+---
+title: "Crop Timing Visualization"
+output: html_notebook
+---
+
+# **Central farm location (red dot)**
+
+#![location](images/location.png)
+
+# **Central farm cropping**
+
+The central farm has both double and single cropped pixels. Double cropped pixels dominate and it appears that SC and DC were planted/harvested at the same time. Perhaps the whole farm is DC and parts were misclassified as SC?
+
+**Double cropped pixels in central farm in 2017:**
+
+#![dc pixels](images/double pixels.png)
+
+**Single cropped pixels in central farm in 2017:**
+
+#![sc pixels](images/single pixels.png)
+
+**All soy pixels in central farm in 2017:**
+
+#![all soy pixels](images/all pixels.png)
+
+# **Timeseries of central farm and of its neighbors**
+
+#![single timeseries](images/single timeseries.png)
+
+#![double timeseries](images/double timeseries.png)
+
+```{r}
+library(ggplot2)
+library(ggridges)
+library(viridis)
+
+specificPoly_data <- read.csv('input/FOI_stats.csv')
+neighbors_double <- read.csv('input/double_50km_MT.csv') 
+neighbors_single <- read.csv('input/single_50km_MT.csv')
+
+```
+
+# **Histograms of neighbors with 50km of central farm**
+
+* <span style="color:red"> Red lines</span> correspond to planting or harvest date estimate at the central farm
+* <span style="color:blue"> Blue lines</span> correspond to onset date (2015 to 2017 don’t have onset estimates yet)
+
+
+```{r}
+# DOUBLE PLANT AND HARVEST
+
+ggplot(neighbors_double, aes(x = neighbors_double$DOY, y = neighbors_double$Year, height = neighbors_double$Count, group = neighbors_double$Year, fill = neighbors_double$DOY)) + 
+  xlim(0, 250) +
+  xlab("DOY from Aug 1") +
+  ylab("Year") +
+  ggtitle("Double crop") +
+  geom_density_ridges_gradient(stat = "identity", scale = 1) +
+  scale_fill_viridis(name = 'Days after Aug 1') +
+  geom_segment(data = specificPoly_data, aes(x = double_plant_median, y = year, group = year, xend = double_plant_median, yend = year + 0.9, height = rep(100, 15), fill = double_plant_median), color = "red") +
+  geom_segment(data = specificPoly_data, aes(x = double_harvest_median, y = year, group = year, xend = double_harvest_median, yend = year + 0.9, height = rep(100, 15), fill = double_harvest_median), color = "red") +
+  geom_segment(data = specificPoly_data, aes(x = onset_median, y = year, group = year, xend = onset_median, yend = year + 0.9, height = rep(100, 15), fill = onset_median), color = "blue") 
+
+
+
+
+```
+
+```{r}
+# SINGLE PLANT AND HARVEST
+
+ggplot(neighbors_single, aes(x = neighbors_single$DOY, y = neighbors_single$Year, height = neighbors_single$Count, group = neighbors_single$Year, fill = neighbors_single$DOY)) + 
+  xlim(0, 250) +
+  xlab("DOY from Aug 1") +
+  ylab("Year") +
+  ggtitle("Single crop") +
+  geom_density_ridges_gradient(stat = "identity", scale = 1) +
+  scale_fill_viridis(name = 'Days after Aug 1') +
+  geom_segment(data = specificPoly_data, aes(x = single_plant_median, y = year, group = year, xend = single_plant_median, yend = year + 0.9, height = rep(100, 15), fill = single_plant_median), color = "red") +
+  geom_segment(data = specificPoly_data, aes(x = single_harvest_median, y = year, group = year, xend = single_harvest_median, yend = year + 0.9, height = rep(100, 15), fill = single_harvest_median), color = "red") +
+  geom_segment(data = specificPoly_data, aes(x = onset_median, y = year, group = year, xend = onset_median, yend = year + 0.9, height = rep(100, 15), fill = onset_median), color = "blue") 
+
+```
+
+# **To add: maps of planting/harvest estimates for neighboring polygons**
+
+
+
+# **Notes**
+
+**Choosing CAR polygons ‘of interest’**
+
+* In MT, a polygon that coincided with Rally point and Dave’s sample point and that also was consistently planted from 2003 to 2017
+* In Matopiba, a polygon that coincided with Dave’s sample point, a Matopiba survey point that had consistent reported data over the Matopiba survey years
+
+**Filtering CAR polygons**
+
+Used only polygons with:
+
+* Total area > 2 km2
+* Planted : total area ratio > 20% 
+* Planting between 50 and 150 and harvest between 150 and 250 days after Aug 1

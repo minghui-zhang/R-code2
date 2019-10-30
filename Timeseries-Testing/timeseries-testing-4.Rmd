@@ -1,0 +1,1156 @@
+---
+title: "timeseries-testing"
+output: html_document
+---
+
+## Read in timeseries and clean
+
+```{r}
+
+library(imputeTS)
+library(dplyr)
+library(signal) # Savitsky-Golay fitting
+library(dplyr)
+library(zoo)
+library(ggplot2)
+
+# need to read in, because regardless of whether use smooth or unsmoothed EVI for the other fitting methods, must start with nonsmoothed EVI here. doubly smoothed EVI (20, 20) is in the csv
+ts <- read.csv('point1.csv')[,1:2]
+
+colnames(ts) <- c('date', 'EVI_raw')
+ts$date <- as.Date(ts$date, '%d-%h-%y')
+ts$day <- as.numeric(ts$date - as.Date('2016-08-01')) # number of days
+
+year <- 2017
+year_start = year - 1
+year_end = year
+
+# plot raw EVI for looking at datq quality, DOY for rising and falling limbs
+plot(ts[ts$day >= 0 & ts$day <= 365,]$day, ts[ts$day >= 0 & ts$day <= 365,]$EVI_raw, main = 'raw EVI', xlab = 'DOY after Aug 1', ylab = 'EVI')
+
+```
+
+## Helper functions
+
+```{r}
+
+# function to smooth by certain number of days (not by index). numDays creates +/- window; so actual smoothing window is - numDays to + numDays
+smooth_by_days <- function(numDays, t, values) {
+  
+  smoothed <- numeric(length(values))
+  
+  for (index in 1:length(values)) {
+    
+    # get time window
+    day_center <- t[index]
+    day_start <- day_center - numDays
+    day_end <- day_center + numDays
+    
+    # get indices corresponding to time window
+    indices <- which(t >= day_start & t <= day_end)
+    
+    # get average of values over the indices and save
+    mean_value <- mean(values[indices], na.rm = TRUE)
+    
+    smoothed[index] <- mean_value
+    
+  }
+  
+  return(smoothed)
+}
+
+# calculate first derivative of smoothed EVI (forward 1st order difference)
+calc_1st_deriv <- function(values) {
+  
+  derivatives <- numeric(length(values))
+  
+  for (index in 1:(length(values)-1)) {
+
+    derivative <- values[index + 1] - values[index]
+
+    derivatives[index] <- derivative
+  }
+  
+  derivatives[length(values)] <- derivatives[length(values) - 1] # to make sure the 1st derivative length still matches total time
+  
+  return(derivatives)
+}
+
+```
+
+## GEE algorithm functions
+
+```{r}
+
+# GEE algorithm function
+# given: fitting degree (window size for smoothing EVI (2) and dEVI); timeseries as df, columns of date and raw EVI; number of points to take out randomly
+# returns: quarter period and peak date
+R_GEE_algorithm <- function(ts, window_EVI_1, window_EVI_2, window_dEVI, numMissingPts) {
+  
+  # cut EVI to only Aug 1, 2016 to April 1, 2017
+  
+  ts <- ts[ts$day >= 0 & ts$day <= 243,]
+  
+  # cut out randomly selected missing dates; first make sure the points are sampled from days that have data
+  missing_days <- sample(unique(ts[complete.cases(ts),]$day), numMissingPts, replace = F) # days to take out
+ 
+  #plot(ts$day, ts$EVI_raw, main = 'before and after taking out data')
+  
+  ts$EVI_raw[ts$day %in% missing_days] <- NA # replace the randomly selected dates' EVI_raw with 'NA'
+  
+  #points(ts$day, ts$EVI_raw, col = 'red')
+  
+  EVI_raw <- ts$EVI_raw
+  t <- ts$day
+  
+  # smooth EVI series by 20 days, then 20 days
+  EVI_smoothed1 <- smooth_by_days(window_EVI_1, t, EVI_raw)
+  EVI_smoothed2 <- smooth_by_days(window_EVI_2, t, EVI_smoothed1)
+  
+  # clean up EVI_smoothed2. for every date, replace with mean of the 2 EVI points and linearly interpolate at NaN times
+  ts_R <- data.frame(t, EVI_smoothed2)
+  ts_R <- ts_R %>% group_by(t) %>%
+          summarise_at(vars(EVI_smoothed2), mean)
+  
+  # from here, the data won't be doubled on each date!
+  EVI_smoothed2 <- na.approx(ts_R$EVI_smoothed2, na.rm = FALSE)
+  ts_R$EVI_smoothed2 <- EVI_smoothed2
+  t <- ts_R$t
+
+  dEVI <- calc_1st_deriv(EVI_smoothed2)
+  ts_R$dEVI <- dEVI
+
+  # calculate smoothed dEVI
+  dEVI_smoothed <- smooth_by_days(window_dEVI, t, dEVI)
+  ts_R$dEVI_smoothed <- dEVI_smoothed
+
+  
+  # numerically find date of maxEVI and max dEVI (after smoothing)
+  maxEVIday <- ts_R$t[which(ts_R$EVI_smoothed2 == max(ts_R$EVI_smoothed2, na.rm = TRUE))][1]
+  
+  # the maxdEVIday must occur before maxEVIday
+  ts_for_maxdEVI <- ts_R[which(ts_R$t <= maxEVIday), ]
+  maxdEVIday <- ts_for_maxdEVI$t[which(ts_for_maxdEVI$dEVI_smoothed == max(ts_for_maxdEVI$dEVI_smoothed, na.rm = TRUE))][1]
+  
+  quarterPd <- maxEVIday - maxdEVIday
+  
+  # catch quarter period < 0, if so, exit the function
+  if (quarterPd <= 0) {
+    results <- c(-1, -1, -1)
+    names(results) <- c('maxEVIday_numeric', 'quarterPd', 'maxEVIday_fitted')
+    return(results)
+  }
+  
+  # get window over which to fit
+  windowStart <- maxEVIday - 2*quarterPd
+  windowEnd <- maxEVIday + quarterPd
+  ts_fitting_R <- ts_R[which(ts_R$t >= windowStart & ts_R$t <= windowEnd),]
+  # get rid of rows with NA values in EVI_smoothed2
+  
+  freq_invYrs <- 1/(4*(quarterPd/365)) # omega
+  
+  # fit over first crop. benchmark to Aug 1
+  t_yrs <- (ts_fitting_R$t)/365
+  wt <- 2*3.14*freq_invYrs*t_yrs
+  EVI_fitting <- ts_fitting_R$EVI_smoothed2
+  
+  # Model that sets w (as in TIMESAT)
+  model_GEE_harmonic <- lm(EVI_fitting~ t_yrs + cos(wt) + sin(wt))
+
+  #plot(ts_fitting_R$t, EVI_fitting)
+  #lines(ts_fitting_R$t, EVI_fitting, col = "green")
+  #lines(ts_fitting_R$t, fitted(model_GEE_harmonic), col = "red")
+  
+  # calculate fitted maximum day. NOTE, the fitted phi doesn't always match with GEE fitted phi... GEE's phi is usually around +2 or -3
+  b2 <- model_GEE_harmonic$coefficients[3]
+  b3 <- model_GEE_harmonic$coefficients[4]
+  phi <- (atan(b3/b2))
+  
+  # the phase when calculated from the day the harmonic function started fitting (windowStart)
+  #maxEVIday_fitted <- 365*phi/(2*3.14*freq_invYrs)
+  #if (maxEVIday_fitted < 0) {maxEVIday_fitted <- maxEVIday_fitted + 365/freq_invYrs}
+  
+  results <- c(maxEVIday, quarterPd)
+  names(results) <- c('maxEVIday_numeric', 'quarterPd')
+  
+  return(results)
+}
+
+# takes elimPoints, the vector of number of points to eliminate, and numRuns, the number of runs to do per number of points eliminated
+run_GEE_algorithm <- function(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, window_dEVI) {
+
+  # to hold results
+  peak_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  peak_fitted_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  quarterPd_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  
+  # run with appropriate number of missing points
+  for (numMissingPts_index in 1:length(elimPoints)) {
+    for (runIndex in 1:numRuns) {
+      
+      numMissingPts <- elimPoints[numMissingPts_index]
+      result <- R_GEE_algorithm(ts, window_EVI_1, window_EVI_2, window_dEVI, numMissingPts)
+      peak_results[runIndex, numMissingPts_index] <- result['maxEVIday_numeric']
+      peak_fitted_results[runIndex, numMissingPts_index] <- result['maxEVIday_fitted']
+      quarterPd_results[runIndex, numMissingPts_index] <- result['quarterPd']
+    }
+  }
+  
+  # calculate mean and sd of each elimPoints option
+  peak_means <- colMeans(peak_results)
+  peak_sd <- apply(peak_results, 2, sd)
+  
+  peak_fitted_means <- colMeans(peak_fitted_results)
+  peak_fitted_sd <- apply(peak_fitted_results, 2, sd)
+  
+  quarterPd_means <- colMeans(quarterPd_results)
+  quarterPd_sd <- apply(quarterPd_results, 2, sd)
+  
+  # combine stats into named matrix
+  results <- matrix(c(peak_means, peak_sd, quarterPd_means, quarterPd_sd, peak_fitted_means, peak_fitted_sd), ncol = length(elimPoints), byrow = TRUE)
+  rownames(results) <- c('peak_mean', 'peak_sd', 'quarterPd_mean', 'quarterPd_sd', 'peak_fitted_mean', 'peak_fitted_sd')
+  colnames(results) <- elimPoints
+  
+  return(results)
+}
+
+
+# change the smoothing, and plot how results change as data degrades
+# smoothing_names is the name to assign to each combo of smoothing windows
+# NOTE, the smoothing options are pairwise, NOT window_EVI_1_vector x window_EVI_2_vector
+test_smoothing_GEE <- function(ts, numRuns, elimPoints, window_EVI_1_vector, window_EVI_2_vector, window_dEVI_vector, smoothing_names) {
+  
+  # add to this as get peak and quarter period results for each smoothing type
+  # jitter_amount is for plotting points that aren't completely overlaid on each other
+  plot_df <- data.frame(smoothing_name = character(0), eliminated_points = numeric(0), peak_mean = numeric(0), peak_sd = numeric(0),
+                        quarterPd_mean = numeric(0), quarterPd_sd = numeric(0), jitter_amount = numeric(0))
+  
+  for (smoothingIndex in 1:length(smoothing_names)) {
+    
+    # get the smoothing parameters
+    window_EVI_1 <- window_EVI_1_vector[smoothingIndex]
+    window_EVI_2 <- window_EVI_2_vector[smoothingIndex]
+    window_dEVI <- window_dEVI_vector[smoothingIndex]
+    
+    smoothing_name <- smoothing_names[smoothingIndex]
+    
+    # run algorithm the appropriate number of times, then save them in the plot_df
+    results <- run_GEE_algorithm(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, window_dEVI)
+    plot_df <- rbind(plot_df, data.frame(smoothing_name = rep(smoothing_name, length(elimPoints)), eliminated_points = elimPoints, peak_mean = results['peak_mean',], peak_sd = results['peak_sd',], quarterPd_mean = results['quarterPd_mean',], quarterPd_sd = results['quarterPd_sd',], jitter_amount = rep(smoothingIndex/10, length(elimPoints))))
+  
+    
+    plot(elimPoints, results['peak_mean',], main = paste0('mean peak for ', smoothing_name), ylab = 'peak [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['peak_mean',]-results['peak_sd',]), max(results['peak_mean',]+results['peak_sd',])))
+    arrows(elimPoints, results['peak_mean',]-results['peak_sd',], elimPoints, results['peak_mean',]+results['peak_sd',], length=0.05, angle=90, code=3)
+    
+    plot(elimPoints, results['quarterPd_mean',], main = paste0('mean quarterPd for ', smoothing_name), ylab = 'quarterPd [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['quarterPd_mean',]-results['quarterPd_sd',]), max(results['quarterPd_mean',]+results['quarterPd_sd',])))
+    arrows(elimPoints, results['quarterPd_mean',]-results['quarterPd_sd',], elimPoints, results['quarterPd_mean',]+results['quarterPd_sd',], length=0.05, angle=90, code=3)
+  }
+  
+  plot_df$eliminated_points_toPlot <- plot_df$eliminated_points + plot_df$jitter_amount
+  
+  plot_df <- plot_df %>% group_by(smoothing_name)
+  
+  peak_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, peak_mean, ymin = peak_mean - peak_sd, ymax = peak_mean + peak_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Peak, GEE') +
+    xlab('Number of eliminated points') +
+    ylab('Peak DOY since Aug 1')
+    
+  quarterPd_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, quarterPd_mean, ymin = quarterPd_mean - quarterPd_sd, ymax = quarterPd_mean + quarterPd_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Quarter period, GEE') +
+    xlab('Number of eliminated points') +
+    ylab('Quarter period [days]')
+    
+  print(peak_summary_plot)
+  print(quarterPd_summary_plot)
+}
+
+```
+
+## Computations
+
+```{r}
+
+test_smoothing_GEE(ts, 50, c(0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10), c(20, 0, 0, 20, 20), c(20, 0, 0, 20, 0), c(40, 0, 40, 0, 40), c('full smoothing', 'no smoothing', 'only dEVI smoothing', 'EVI smoothing, no dEVI smoothing', 'half EVI smoothing, dEVI smoothing'))
+
+```
+
+## Savitsky-Golay fitting
+
+```{r}
+
+# SG algorithm function
+# given: fitting degree (window size for smoothing EVI; timeseries as df, columns of date and raw EVI; number of points to take out randomly; the DOY from Aug 1 of the windows over which can find the rising and falling limbs of the first crop
+# returns: quarter period and peak date
+TIMESAT_SG_algorithm <- function(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY) {
+  
+  # cut EVI to only Aug 1, 2016 to April 1, 2017
+  ts <- ts[ts$day >= 0 & ts$day <= 243,]
+  
+  # cut out randomly selected missing dates; first make sure the points are sampled from days that have data
+  missing_days <- sample(unique(ts[complete.cases(ts),]$day), numMissingPts, replace = F) # days to take out
+  ts$EVI_raw[ts$day %in% missing_days] <- NA # replace the randomly selected dates' EVI_raw with 'NA'
+
+  EVI_raw <- ts$EVI_raw
+  t <- ts$day
+  
+  # smooth EVI series by 20 days, then 20 days
+  EVI_smoothed1 <- smooth_by_days(window_EVI_1, t, EVI_raw)
+  EVI_smoothed2 <- smooth_by_days(window_EVI_2, t, EVI_smoothed1)
+  
+  # clean up EVI_smoothed2. for every date, replace with mean of the 2 EVI points and linearly interpolate at NaN times
+  ts_R <- data.frame(t, EVI_smoothed2)
+  ts_R <- ts_R %>% group_by(t) %>%
+          summarise_at(vars(EVI_smoothed2), mean)
+  
+  # from here, the data won't be doubled on each date!
+  EVI_smoothed2 <- na.approx(ts_R$EVI_smoothed2, na.rm = FALSE)
+  # there may still be NA's at tails of EVI_smoothed2. replace these with the nearest non-NA or the average if have multiple NA's
+  NA_location <- which(is.na(EVI_smoothed2))
+  if (length(NA_location) == 1) { # if there is an NA in EVI_smoothed2, replace it with nearest value
+    if (NA_location == 1) {EVI_smoothed2[1] <- EVI_smoothed2[2]}
+    else if ( NA_location == length(EVI_smoothed2)) {EVI_smoothed2[length(EVI_smoothed2)] <- EVI_smoothed2[length(EVI_smoothed2) - 1]}
+  }
+  
+  if (length(NA_location) > 1) {
+    EVI_smoothed2[which(is.na(EVI_smoothed2))] <- mean(EVI_smoothed2, na.rm = TRUE)
+    }
+
+  ts_R$EVI_smoothed2 <- EVI_smoothed2
+  t <- ts_R$t
+  
+  # Savitsky-Golay filter
+  EVI_SG <- sgolayfilt(ts_R$EVI_smoothed2, p = 2, n = 15)
+  
+  # find phenological dates, first make sure the dates found are for first crop, first or second half
+  firstHalf_dates <- which(t >= risingLimb_start_DOY & t <= risingLimb_end_DOY) # rising limb of first crop
+  t_firstHalf <- t[firstHalf_dates]
+  fittedEVI_firstHalf <- EVI_SG[firstHalf_dates]
+  
+  secondHalf_dates <- which(t >= fallingLimb_start_DOY & t <= fallingLimb_end_DOY) # falling limb of first crop
+  t_secondHalf <- t[secondHalf_dates]
+  fittedEVI_secondHalf <- EVI_SG[secondHalf_dates]
+  
+  firstCrop_dates <- which(t >= risingLimb_start_DOY & t <= fallingLimb_end_DOY) # first crop
+  t_firstCrop <- t[firstCrop_dates]
+  fittedEVI_firstCrop <- EVI_SG[firstCrop_dates]
+
+  # date and value of max EVI
+  maxEVI <- max(fittedEVI_firstCrop, na.rm = TRUE)
+  minEVI_left <- min(fittedEVI_firstHalf, na.rm = TRUE)
+  minEVI_right <- min(fittedEVI_secondHalf, na.rm = TRUE)
+  
+  date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)$y
+  
+  # find phenological dates
+  rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+  leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+  date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)$y
+  date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)$y
+  
+  if (is.na(date_rightOfPeak)) {date_rightOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+  if (is.na(date_leftOfPeak)) {date_leftOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+
+  midSeason <- mean(c(date_rightOfPeak, date_leftOfPeak))
+  quarter_period_comparable <- (midSeason - date_min)/2
+
+  results <- c(midSeason, quarter_period_comparable)
+  names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+}
+
+# takes elimPoints, the vector of number of points to eliminate, and numRuns, the number of runs to do per number of points eliminated
+run_SG_algorithm <- function(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY) {
+
+  # to hold results
+  peak_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  quarterPd_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  
+  # run with appropriate number of missing points
+  for (numMissingPts_index in 1:length(elimPoints)) {
+    for (runIndex in 1:numRuns) {
+      
+      numMissingPts <- elimPoints[numMissingPts_index]
+      result <- TIMESAT_SG_algorithm(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY)
+      
+      peak_results[runIndex, numMissingPts_index] <- result['midSeason']
+      quarterPd_results[runIndex, numMissingPts_index] <- result['quarterPd_comparable']
+    }
+  }
+  
+  peak_means <- colMeans(peak_results, na.rm = TRUE)
+  peak_sd <- apply(peak_results, 2, sd)
+  
+  quarterPd_means <- colMeans(quarterPd_results, na.rm = TRUE)
+  quarterPd_sd <- apply(quarterPd_results, 2, sd, na.rm = TRUE)
+  
+  # combine stats into named matrix
+  results <- matrix(c(peak_means, peak_sd, quarterPd_means, quarterPd_sd), ncol = length(elimPoints), byrow = TRUE)
+  rownames(results) <- c('peak_mean', 'peak_sd', 'quarterPd_mean', 'quarterPd_sd')
+  colnames(results) <- elimPoints
+  
+  return(results)
+}
+
+# change the smoothing, and plot how results change as data degrades
+# smoothing_names is the name to assign to each combo of smoothing windows
+# NOTE, the smoothing options are pairwise, NOT window_EVI_1_vector x window_EVI_2_vector
+test_smoothing_SG <- function(ts, numRuns, elimPoints, window_EVI_1_vector, window_EVI_2_vector, smoothing_names, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY) {
+  
+  # add to this as get peak and quarter period results for each smoothing type
+  # jitter_amount is for plotting points that aren't completely overlaid on each other
+  plot_df <- data.frame(smoothing_name = character(0), eliminated_points = numeric(0), peak_mean = numeric(0), peak_sd = numeric(0),
+                        quarterPd_mean = numeric(0), quarterPd_sd = numeric(0), jitter_amount = numeric(0))
+  
+  for (smoothingIndex in 1:length(smoothing_names)) {
+    
+    # get the smoothing parameters
+    window_EVI_1 <- window_EVI_1_vector[smoothingIndex]
+    window_EVI_2 <- window_EVI_2_vector[smoothingIndex]
+    
+    smoothing_name <- smoothing_names[smoothingIndex]
+    
+    # run algorithm the appropriate number of times
+    results <- run_SG_algorithm(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY)
+     plot_df <- rbind(plot_df, data.frame(smoothing_name = rep(smoothing_name, length(elimPoints)), eliminated_points = elimPoints, peak_mean = results['peak_mean',], peak_sd = results['peak_sd',], quarterPd_mean = results['quarterPd_mean',], quarterPd_sd = results['quarterPd_sd',], jitter_amount = rep(smoothingIndex/10, length(elimPoints))))
+
+    # plot the results
+    plot(elimPoints, results['peak_mean',], main = paste0('mean peak for ', smoothing_name), ylab = 'peak [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['peak_mean',]-results['peak_sd',]), max(results['peak_mean',]+results['peak_sd',])))
+    arrows(elimPoints, results['peak_mean',]-results['peak_sd',], elimPoints, results['peak_mean',]+results['peak_sd',], length=0.05, angle=90, code=3)
+    
+    plot(elimPoints, results['quarterPd_mean',], main = paste0('mean quarterPd for ', smoothing_name), ylab = 'quarterPd [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['quarterPd_mean',]-results['quarterPd_sd',]), max(results['quarterPd_mean',]+results['quarterPd_sd',])))
+    arrows(elimPoints, results['quarterPd_mean',]-results['quarterPd_sd',], elimPoints, results['quarterPd_mean',]+results['quarterPd_sd',], length=0.05, angle=90, code=3)
+  }
+  
+  plot_df$eliminated_points_toPlot <- plot_df$eliminated_points + plot_df$jitter_amount
+  
+  plot_df <- plot_df %>% group_by(smoothing_name)
+  
+  peak_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, peak_mean, ymin = peak_mean - peak_sd, ymax = peak_mean + peak_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Peak, Savitsky-Golay') +
+    xlab('Number of eliminated points') +
+    ylab('Peak DOY since Aug 1')
+    
+  quarterPd_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, quarterPd_mean, ymin = quarterPd_mean - quarterPd_sd, ymax = quarterPd_mean + quarterPd_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Quarter period, Savitsky-Golay') +
+    xlab('Number of eliminated points') +
+    ylab('Quarter period [days]')
+    
+  print(peak_summary_plot)
+  print(quarterPd_summary_plot)
+}
+
+```
+
+## Computations
+
+```{r}
+
+test_smoothing_SG(ts, 50, c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), c(0, 0, 20), c(0, 20, 20), c('no smoothing', 'half smoothing', 'full smoothing'), 120, 190, 170, 240)
+
+```
+
+## Harmonic fitting with estimated omega -- with 1st order harmonic only
+
+```{r}
+harmonic_nls_simple_algorithm <- function(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+  
+  # cut EVI to only Aug 1, 2016 to July 31, 2017
+  targeted_start_day <- as.numeric(as.Date(fittingStartDay) - as.Date('2016-08-01'))
+  targeted_end_day <- as.numeric(as.Date(fittingEndDay) - as.Date('2016-08-01'))
+  targeted_days <- which(ts$day >= targeted_start_day & ts$day <= targeted_end_day) # index of days to target
+  
+  ts <- ts[targeted_days,]
+  
+  # cut out randomly selected missing dates; first make sure the points are sampled from days that have data
+  missing_days <- sample(unique(ts[complete.cases(ts),]$day), numMissingPts, replace = F) # days to take out
+  ts$EVI_raw[ts$day %in% missing_days] <- NA # replace the randomly selected dates' EVI_raw with 'NA'
+
+  EVI_raw <- ts$EVI_raw
+  t <- ts$day
+  
+  # smooth EVI series by 20 days, then 20 days
+  EVI_smoothed1 <- smooth_by_days(window_EVI_1, t, EVI_raw)
+  EVI_smoothed2 <- smooth_by_days(window_EVI_2, t, EVI_smoothed1)
+  
+  # clean up EVI_smoothed2. for every date, replace with mean of the 2 EVI points and linearly interpolate at NaN times
+  ts_R <- data.frame(t, EVI_smoothed2)
+  ts_R <- ts_R %>% group_by(t) %>%
+          summarise_at(vars(EVI_smoothed2), mean)
+
+  # from here, the data won't be doubled on each date!
+  EVI_smoothed2 <- na.approx(ts_R$EVI_smoothed2, na.rm = FALSE)
+  # there may still be NA's at tails of EVI_smoothed2. replace these with the nearest non-NA or the average if have multiple NA's
+  NA_location <- which(is.na(EVI_smoothed2))
+  if (length(NA_location) == 1) { # if there is an NA in EVI_smoothed2, replace it with nearest value
+    if (NA_location == 1) {EVI_smoothed2[1] <- EVI_smoothed2[2]}
+    else if ( NA_location == length(EVI_smoothed2)) {EVI_smoothed2[length(EVI_smoothed2)] <- EVI_smoothed2[length(EVI_smoothed2) - 1]}
+  }
+  
+  if (length(NA_location) > 1) {
+    EVI_smoothed2[which(is.na(EVI_smoothed2))] <- mean(EVI_smoothed2, na.rm = TRUE)
+    }
+
+  ts_R$EVI_smoothed2 <- EVI_smoothed2
+  
+  # harmonic fitting
+  t_fitting <- ts_R$t/(2*3.14)
+  
+  #plot(t_fitting, EVI_smoothed2)
+  #lines(t_fitting, EVI_smoothed2, col = "green")
+    
+  # Model that estimates w. if smoothing fails, use try to return NA's for midSeason and quarterPeriod_comparable and exit function
+  model_nls1 <- try(nls(EVI_smoothed2~c1 + c2*t_fitting + c3*(t_fitting^2) + c4*sin(w*t_fitting) + c5*cos(w*t_fitting),
+             start = list(c1 = -1, c2 = 0.1, c3 = 0.1, 
+                          c4 = 0.1, c5 = 0.1, w = 0.3
+                          ),
+             control = nls.control(maxiter = 2000, minFactor = 1e-7))
+  )
+  if(is(model_nls1, "try-error")) {
+    results <- c(NA, NA)
+    names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+  }
+
+  #lines(t_fitting, fitted(model_nls1), col = "red")
+  
+  # retreive omega from estimated coefficients
+  omega <- summary(model_nls1)$parameters[8]
+  quarter_period <- 3.14/(2*omega)
+  period <- 2*3.14/omega
+  
+  # find phenological dates, first make sure the dates found are for first crop, first or second half
+  firstHalf_dates <- which(ts_R$t >= risingLimb_start_DOY & ts_R$t <= risingLimb_end_DOY) # rising limb of first crop
+  t_firstHalf <- ts_R$t[firstHalf_dates]
+  fittedEVI_firstHalf <- fitted(model_nls1)[firstHalf_dates]
+  
+  secondHalf_dates <- which(ts_R$t >= fallingLimb_start_DOY & ts_R$t <= fallingLimb_end_DOY) # falling limb of first crop
+  t_secondHalf <- ts_R$t[secondHalf_dates]
+  fittedEVI_secondHalf <- fitted(model_nls1)[secondHalf_dates]
+  
+  firstCrop_dates <- which(ts_R$t >= risingLimb_start_DOY & ts_R$t <= fallingLimb_end_DOY) # first crop
+  t_firstCrop <- ts_R$t[firstCrop_dates]
+  fittedEVI_firstCrop <- fitted(model_nls1)[firstCrop_dates]
+  
+  # date and value of max EVI
+  maxEVI <- max(fittedEVI_firstCrop, na.rm = TRUE)
+  minEVI_left <- min(fittedEVI_firstHalf, na.rm = TRUE)
+  minEVI_right <- min(fittedEVI_secondHalf, na.rm = TRUE)
+  
+  date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)$y
+  
+  # find phenological dates
+  rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+  leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+  date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)$y
+  date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)$y
+  
+  if (is.na(date_rightOfPeak)) {date_rightOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+  if (is.na(date_leftOfPeak)) {date_leftOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+
+  midSeason <- mean(c(date_rightOfPeak, date_leftOfPeak))
+  quarter_period_comparable <- (midSeason - date_min)/2
+  
+  results <- c(midSeason, quarter_period_comparable)
+  names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+}
+
+
+#print(harmonic_nls_simple_algorithm(ts, 10, 20, 0, 40, 140, 130, 240, '2016-10-01', '2017-03-01'))
+
+# takes elimPoints, the vector of number of points to eliminate, and numRuns, the number of runs to do per number of points eliminated
+run_harmonic_nls_simple_algorithm <- function(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+
+  # to hold results
+  peak_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  quarterPd_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  
+  # run with appropriate number of missing points
+  for (numMissingPts_index in 1:length(elimPoints)) {
+    for (runIndex in 1:numRuns) {
+      
+      numMissingPts <- elimPoints[numMissingPts_index]
+      result <- harmonic_nls_simple_algorithm(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay)
+      
+      peak_results[runIndex, numMissingPts_index] <- result['midSeason']
+      quarterPd_results[runIndex, numMissingPts_index] <- result['quarterPd_comparable']
+    }
+  }
+  
+  peak_means <- colMeans(peak_results, na.rm = TRUE)
+  peak_sd <- apply(peak_results, 2, sd, na.rm = TRUE)
+  
+  quarterPd_means <- colMeans(quarterPd_results, na.rm = TRUE)
+  quarterPd_sd <- apply(quarterPd_results, 2, sd, na.rm = TRUE)
+  
+  # combine stats into named matrix
+  results <- matrix(c(peak_means, peak_sd, quarterPd_means, quarterPd_sd), ncol = length(elimPoints), byrow = TRUE)
+  rownames(results) <- c('peak_mean', 'peak_sd', 'quarterPd_mean', 'quarterPd_sd')
+  colnames(results) <- elimPoints
+  
+  return(results)
+}
+
+#print(run_harmonic_nls_simple_algorithm(ts, 10, 0, 10, 20, 40, 140, 130, 240, '2016-10-01', '2017-03-01'))
+
+# change the smoothing, and plot how results change as data degrades
+# smoothing_names is the name to assign to each combo of smoothing windows
+# NOTE, the smoothing options are pairwise, NOT window_EVI_1_vector x window_EVI_2_vector
+test_smoothing_harmonic_nls_simple <- function(ts, numRuns, elimPoints, window_EVI_1_vector, window_EVI_2_vector, smoothing_names, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+  
+  # add to this as get peak and quarter period results for each smoothing type
+  # jitter_amount is for plotting points that aren't completely overlaid on each other
+  plot_df <- data.frame(smoothing_name = character(0), eliminated_points = numeric(0), peak_mean = numeric(0), peak_sd = numeric(0),
+                        quarterPd_mean = numeric(0), quarterPd_sd = numeric(0), jitter_amount = numeric(0))
+  
+  for (smoothingIndex in 1:length(smoothing_names)) {
+    
+    # get the smoothing parameters
+    window_EVI_1 <- window_EVI_1_vector[smoothingIndex]
+    window_EVI_2 <- window_EVI_2_vector[smoothingIndex]
+    
+    smoothing_name <- smoothing_names[smoothingIndex]
+    
+    # run algorithm the appropriate number of times
+    results <- run_harmonic_nls_simple_algorithm(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay)
+    plot_df <- rbind(plot_df, data.frame(smoothing_name = rep(smoothing_name, length(elimPoints)), eliminated_points = elimPoints, peak_mean = results['peak_mean',], peak_sd = results['peak_sd',], quarterPd_mean = results['quarterPd_mean',], quarterPd_sd = results['quarterPd_sd',], jitter_amount = rep(smoothingIndex/10, length(elimPoints))))
+
+    # plot the results
+    plot(elimPoints, results['peak_mean',], main = paste0('mean peak for ', smoothing_name), ylab = 'peak [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['peak_mean',]-results['peak_sd',]), max(results['peak_mean',]+results['peak_sd',])))
+    arrows(elimPoints, results['peak_mean',]-results['peak_sd',], elimPoints, results['peak_mean',]+results['peak_sd',], length=0.05, angle=90, code=3)
+    
+    plot(elimPoints, results['quarterPd_mean',], main = paste0('mean quarterPd for ', smoothing_name), ylab = 'quarterPd [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['quarterPd_mean',]-results['quarterPd_sd',]), max(results['quarterPd_mean',]+results['quarterPd_sd',])))
+    arrows(elimPoints, results['quarterPd_mean',]-results['quarterPd_sd',], elimPoints, results['quarterPd_mean',]+results['quarterPd_sd',], length=0.05, angle=90, code=3)
+  }
+  
+  plot_df$eliminated_points_toPlot <- plot_df$eliminated_points + plot_df$jitter_amount
+  
+  plot_df <- plot_df %>% group_by(smoothing_name)
+  
+  peak_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, peak_mean, ymin = peak_mean - peak_sd, ymax = peak_mean + peak_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Peak, harmonic nls') +
+    xlab('Number of eliminated points') +
+    ylab('Peak DOY since Aug 1')
+    
+  quarterPd_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, quarterPd_mean, ymin = quarterPd_mean - quarterPd_sd, ymax = quarterPd_mean + quarterPd_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Quarter period, harmonic nls') +
+    xlab('Number of eliminated points') +
+    ylab('Quarter period [days]')
+    
+  print(peak_summary_plot)
+  print(quarterPd_summary_plot)
+}
+```
+
+## Harmonic nls computation
+
+```{r}
+test_smoothing_harmonic_nls_simple(ts, 50, seq(0, 10), c(0, 0, 20), c(0, 20, 20), c('no smoothing', 'half smoothing', 'full smoothing'), 120, 190, 170, 240, '2016-10-01', '2017-03-01')
+```
+
+## Harmonic fitting with estimated omega
+
+```{r}
+
+# harmonic fitting function (estimates omega)
+# given: fitting degree (window size for smoothing EVI; timeseries as df, columns of date and raw EVI; number of points to take out randomly; the DOY from Aug 1 of the windows over which can find the rising and falling limbs of the first crop
+# returns: quarter period and peak date
+# the fittingStartDay and fittingEndDay are the windows over which to fit harmonic function; make sure they cover the peak(s) but not the dry season
+
+#risingLimb_start_DOY <- 50
+#risingLimb_end_DOY <- 120
+#fallingLimb_start_DOY <- 120
+#fallingLimb_end_DOY <- 190 
+#window_EVI_1 <- 0
+#window_EVI_2 <- 0
+#numMissingPts <- 8
+#fittingStartDay <- '2016-10-01'
+#fittingEndDay <- '2017-07-01'
+
+harmonic_nls_algorithm <- function(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+  
+  # cut EVI to only Aug 1, 2016 to July 31, 2017
+  targeted_start_day <- as.numeric(as.Date(fittingStartDay) - as.Date('2016-08-01'))
+  targeted_end_day <- as.numeric(as.Date(fittingEndDay) - as.Date('2016-08-01'))
+  targeted_days <- which(ts$day >= targeted_start_day & ts$day <= targeted_end_day) # index of days to target
+  
+  ts <- ts[targeted_days,]
+  
+  # cut out randomly selected missing dates; first make sure the points are sampled from days that have data
+  missing_days <- sample(unique(ts[complete.cases(ts),]$day), numMissingPts, replace = F) # days to take out
+  ts$EVI_raw[ts$day %in% missing_days] <- NA # replace the randomly selected dates' EVI_raw with 'NA'
+
+  EVI_raw <- ts$EVI_raw
+  t <- ts$day
+  
+  # smooth EVI series by 20 days, then 20 days
+  EVI_smoothed1 <- smooth_by_days(window_EVI_1, t, EVI_raw)
+  EVI_smoothed2 <- smooth_by_days(window_EVI_2, t, EVI_smoothed1)
+  
+  # clean up EVI_smoothed2. for every date, replace with mean of the 2 EVI points and linearly interpolate at NaN times
+  ts_R <- data.frame(t, EVI_smoothed2)
+  ts_R <- ts_R %>% group_by(t) %>%
+          summarise_at(vars(EVI_smoothed2), mean)
+
+  # from here, the data won't be doubled on each date!
+  EVI_smoothed2 <- na.approx(ts_R$EVI_smoothed2, na.rm = FALSE)
+  # there may still be NA's at tails of EVI_smoothed2. replace these with the nearest non-NA or the average if have multiple NA's
+  NA_location <- which(is.na(EVI_smoothed2))
+  if (length(NA_location) == 1) { # if there is an NA in EVI_smoothed2, replace it with nearest value
+    if (NA_location == 1) {EVI_smoothed2[1] <- EVI_smoothed2[2]}
+    else if ( NA_location == length(EVI_smoothed2)) {EVI_smoothed2[length(EVI_smoothed2)] <- EVI_smoothed2[length(EVI_smoothed2) - 1]}
+  }
+  
+  if (length(NA_location) > 1) {
+    EVI_smoothed2[which(is.na(EVI_smoothed2))] <- mean(EVI_smoothed2, na.rm = TRUE)
+    }
+
+  ts_R$EVI_smoothed2 <- EVI_smoothed2
+  
+  # harmonic fitting
+  t_fitting <- ts_R$t/(2*3.14)
+  
+  #plot(t_fitting, EVI_smoothed2)
+  #lines(t_fitting, EVI_smoothed2, col = "green")
+    
+  # Model that estimates w. if smoothing fails, use try to return NA's for midSeason and quarterPeriod_comparable and exit function
+  model_nls1 <- try(nls(EVI_smoothed2~c1 + c2*t_fitting + c3*(t_fitting^2) + c4*sin(w*t_fitting) + c5*cos(w*t_fitting) +
+               c6*sin(2*w*t_fitting) + c7*cos(2*w*t_fitting), 
+             start = list(c1 = -1, c2 = 0.1, c3 = 0.1, 
+                          c4 = 0.1, c5 = 0.1, c6 = 0,
+                          c7 = 0, w = 0.3
+                          ),
+             control = nls.control(maxiter = 2000, minFactor = 1e-7))
+  )
+  if(is(model_nls1, "try-error")) {
+    results <- c(NA, NA)
+    names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+  }
+
+  #lines(t_fitting, fitted(model_nls1), col = "red")
+  
+  # retreive omega from estimated coefficients
+  omega <- summary(model_nls1)$parameters[8]
+  quarter_period <- 3.14/(2*omega)
+  period <- 2*3.14/omega
+  
+  # find phenological dates, first make sure the dates found are for first crop, first or second half
+  firstHalf_dates <- which(ts_R$t >= risingLimb_start_DOY & ts_R$t <= risingLimb_end_DOY) # rising limb of first crop
+  t_firstHalf <- ts_R$t[firstHalf_dates]
+  fittedEVI_firstHalf <- fitted(model_nls1)[firstHalf_dates]
+  
+  secondHalf_dates <- which(ts_R$t >= fallingLimb_start_DOY & ts_R$t <= fallingLimb_end_DOY) # falling limb of first crop
+  t_secondHalf <- ts_R$t[secondHalf_dates]
+  fittedEVI_secondHalf <- fitted(model_nls1)[secondHalf_dates]
+  
+  firstCrop_dates <- which(ts_R$t >= risingLimb_start_DOY & ts_R$t <= fallingLimb_end_DOY) # first crop
+  t_firstCrop <- ts_R$t[firstCrop_dates]
+  fittedEVI_firstCrop <- fitted(model_nls1)[firstCrop_dates]
+  
+  # date and value of max EVI
+  maxEVI <- max(fittedEVI_firstCrop, na.rm = TRUE)
+  minEVI_left <- min(fittedEVI_firstHalf, na.rm = TRUE)
+  minEVI_right <- min(fittedEVI_secondHalf, na.rm = TRUE)
+  
+  date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)$y
+  
+  # find phenological dates
+  rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+  leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+  date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)$y
+  date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)$y
+  
+  if (is.na(date_rightOfPeak)) {date_rightOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+  if (is.na(date_leftOfPeak)) {date_leftOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+
+  midSeason <- mean(c(date_rightOfPeak, date_leftOfPeak))
+  quarter_period_comparable <- (midSeason - date_min)/2
+  
+  results <- c(midSeason, quarter_period_comparable)
+  names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+}
+
+
+#print(harmonic_nls_algorithm(ts, 10, 20, 0, 40, 140, 130, 240, '2016-10-01', '2017-07-01'))
+
+# takes elimPoints, the vector of number of points to eliminate, and numRuns, the number of runs to do per number of points eliminated
+run_harmonic_nls_algorithm <- function(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+
+  # to hold results
+  peak_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  quarterPd_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  
+  # run with appropriate number of missing points
+  for (numMissingPts_index in 1:length(elimPoints)) {
+    for (runIndex in 1:numRuns) {
+      
+      numMissingPts <- elimPoints[numMissingPts_index]
+      result <- harmonic_nls_algorithm(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay)
+      
+      peak_results[runIndex, numMissingPts_index] <- result['midSeason']
+      quarterPd_results[runIndex, numMissingPts_index] <- result['quarterPd_comparable']
+    }
+  }
+  
+  peak_means <- colMeans(peak_results, na.rm = TRUE)
+  peak_sd <- apply(peak_results, 2, sd, na.rm = TRUE)
+  
+  quarterPd_means <- colMeans(quarterPd_results, na.rm = TRUE)
+  quarterPd_sd <- apply(quarterPd_results, 2, sd, na.rm = TRUE)
+  
+  # combine stats into named matrix
+  results <- matrix(c(peak_means, peak_sd, quarterPd_means, quarterPd_sd), ncol = length(elimPoints), byrow = TRUE)
+  rownames(results) <- c('peak_mean', 'peak_sd', 'quarterPd_mean', 'quarterPd_sd')
+  colnames(results) <- elimPoints
+  
+  return(results)
+}
+
+#print(run_harmonic_nls_algorithm(ts, 10, 0, 10, 20, 40, 140, 130, 240, '2016-10-01', '2017-07-01'))
+
+# change the smoothing, and plot how results change as data degrades
+# smoothing_names is the name to assign to each combo of smoothing windows
+# NOTE, the smoothing options are pairwise, NOT window_EVI_1_vector x window_EVI_2_vector
+test_smoothing_harmonic_nls <- function(ts, numRuns, elimPoints, window_EVI_1_vector, window_EVI_2_vector, smoothing_names, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+  
+  # add to this as get peak and quarter period results for each smoothing type
+  # jitter_amount is for plotting points that aren't completely overlaid on each other
+  plot_df <- data.frame(smoothing_name = character(0), eliminated_points = numeric(0), peak_mean = numeric(0), peak_sd = numeric(0),
+                        quarterPd_mean = numeric(0), quarterPd_sd = numeric(0), jitter_amount = numeric(0))
+  
+  for (smoothingIndex in 1:length(smoothing_names)) {
+    
+    # get the smoothing parameters
+    window_EVI_1 <- window_EVI_1_vector[smoothingIndex]
+    window_EVI_2 <- window_EVI_2_vector[smoothingIndex]
+    
+    smoothing_name <- smoothing_names[smoothingIndex]
+    
+    # run algorithm the appropriate number of times
+    results <- run_harmonic_nls_algorithm(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay)
+    plot_df <- rbind(plot_df, data.frame(smoothing_name = rep(smoothing_name, length(elimPoints)), eliminated_points = elimPoints, peak_mean = results['peak_mean',], peak_sd = results['peak_sd',], quarterPd_mean = results['quarterPd_mean',], quarterPd_sd = results['quarterPd_sd',], jitter_amount = rep(smoothingIndex/10, length(elimPoints))))
+
+    # plot the results
+    plot(elimPoints, results['peak_mean',], main = paste0('mean peak for ', smoothing_name), ylab = 'peak [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['peak_mean',]-results['peak_sd',]), max(results['peak_mean',]+results['peak_sd',])))
+    arrows(elimPoints, results['peak_mean',]-results['peak_sd',], elimPoints, results['peak_mean',]+results['peak_sd',], length=0.05, angle=90, code=3)
+    
+    plot(elimPoints, results['quarterPd_mean',], main = paste0('mean quarterPd for ', smoothing_name), ylab = 'quarterPd [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['quarterPd_mean',]-results['quarterPd_sd',]), max(results['quarterPd_mean',]+results['quarterPd_sd',])))
+    arrows(elimPoints, results['quarterPd_mean',]-results['quarterPd_sd',], elimPoints, results['quarterPd_mean',]+results['quarterPd_sd',], length=0.05, angle=90, code=3)
+  }
+  
+  plot_df$eliminated_points_toPlot <- plot_df$eliminated_points + plot_df$jitter_amount
+  
+  plot_df <- plot_df %>% group_by(smoothing_name)
+  
+  peak_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, peak_mean, ymin = peak_mean - peak_sd, ymax = peak_mean + peak_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Peak, harmonic nls') +
+    xlab('Number of eliminated points') +
+    ylab('Peak DOY since Aug 1')
+    
+  quarterPd_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, quarterPd_mean, ymin = quarterPd_mean - quarterPd_sd, ymax = quarterPd_mean + quarterPd_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Quarter period, harmonic nls') +
+    xlab('Number of eliminated points') +
+    ylab('Quarter period [days]')
+    
+  print(peak_summary_plot)
+  print(quarterPd_summary_plot)
+}
+
+
+```
+
+## Harmonic nls computation
+
+```{r}
+test_smoothing_harmonic_nls(ts, 50, seq(0, 10), c(0, 0, 20), c(0, 20, 20), c('no smoothing', 'half smoothing', 'full smoothing'), 120, 190, 170, 240, '2016-10-01', '2017-06-01')
+```
+
+## Harmonic fitting exactly as in TIMESAT
+
+```{r}
+# harmonic fitting function (doesn't estimate omega)
+# given: fitting degree (window size for smoothing EVI; timeseries as df, columns of date and raw EVI; number of points to take out randomly; the DOY from Aug 1 of the windows over which can find the rising and falling limbs of the first crop
+# returns: quarter period and peak date
+# the fittingStartDay and fittingEndDay are the windows over which to fit harmonic function; make sure they cover the peak(s) but not the dry season
+
+#risingLimb_start_DOY <- 50
+#risingLimb_end_DOY <- 120
+#fallingLimb_start_DOY <- 120
+#fallingLimb_end_DOY <- 190 
+#window_EVI_1 <- 0
+#window_EVI_2 <- 0
+#numMissingPts <- 8
+#fittingStartDay <- '2016-10-01'
+#fittingEndDay <- '2017-07-01'
+
+harmonic_TIMESAT_algorithm <- function(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+  
+  omega <- (6*3.14/length(ts$day))
+  print('omega')
+  print(omega)
+  
+  # cut EVI to only Aug 1, 2016 to July 31, 2017
+  targeted_start_day <- as.numeric(as.Date(fittingStartDay) - as.Date('2016-08-01'))
+  targeted_end_day <- as.numeric(as.Date(fittingEndDay) - as.Date('2016-08-01'))
+  targeted_days <- which(ts$day >= targeted_start_day & ts$day <= targeted_end_day) # index of days to target
+  
+  ts <- ts[targeted_days,]
+  
+  # cut out randomly selected missing dates; first make sure the points are sampled from days that have data
+  missing_days <- sample(unique(ts[complete.cases(ts),]$day), numMissingPts, replace = F) # days to take out
+  ts$EVI_raw[ts$day %in% missing_days] <- NA # replace the randomly selected dates' EVI_raw with 'NA'
+
+  EVI_raw <- ts$EVI_raw
+  t <- ts$day
+  
+  # smooth EVI series by 20 days, then 20 days
+  EVI_smoothed1 <- smooth_by_days(window_EVI_1, t, EVI_raw)
+  EVI_smoothed2 <- smooth_by_days(window_EVI_2, t, EVI_smoothed1)
+  
+  # clean up EVI_smoothed2. for every date, replace with mean of the 2 EVI points and linearly interpolate at NaN times
+  ts_R <- data.frame(t, EVI_smoothed2)
+  ts_R <- ts_R %>% group_by(t) %>%
+          summarise_at(vars(EVI_smoothed2), mean)
+
+  # from here, the data won't be doubled on each date!
+  EVI_smoothed2 <- na.approx(ts_R$EVI_smoothed2, na.rm = FALSE)
+  # there may still be NA's at tails of EVI_smoothed2. replace these with the nearest non-NA or the average if have multiple NA's
+  NA_location <- which(is.na(EVI_smoothed2))
+  if (length(NA_location) == 1) { # if there is an NA in EVI_smoothed2, replace it with nearest value
+    if (NA_location == 1) {EVI_smoothed2[1] <- EVI_smoothed2[2]}
+    else if ( NA_location == length(EVI_smoothed2)) {EVI_smoothed2[length(EVI_smoothed2)] <- EVI_smoothed2[length(EVI_smoothed2) - 1]}
+  }
+  
+  if (length(NA_location) > 1) {
+    EVI_smoothed2[which(is.na(EVI_smoothed2))] <- mean(EVI_smoothed2, na.rm = TRUE)
+    }
+
+  ts_R$EVI_smoothed2 <- EVI_smoothed2
+  
+  # harmonic fitting
+  t_fitting <- ts_R$t
+  wt <- omega*t_fitting/(2*3.14)
+  
+  #plot(t_fitting, EVI_smoothed2)
+  #lines(t_fitting, EVI_smoothed2, col = "green")
+    
+  # Fit. if smoothing fails, use try to return NA's for midSeason and quarterPeriod_comparable and exit function
+  model_nls2 <- try(model_nls2 <- nls(EVI_smoothed2~c1 + c2*t_fitting + c3*(t_fitting^2) + c4*sin(wt) + c5*cos(wt) +
+               c6*sin(2*wt) + c7*cos(2*wt) + 
+               c8*sin(3*wt) + c9*cos(3*wt), 
+             start = list(c1 = 0.5, c2 = 0, c3 = 0, 
+                          c4 = 0, c5 = 0, c6 = 0,
+                          c7 = 0, c8 = 0, c9 = 0
+                          ),
+             control = nls.control(maxiter = 2000, minFactor = 1e-5))
+  )
+  if(is(model_nls2, "try-error")) {
+    results <- c(NA, NA)
+    names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+  }
+
+  #lines(t_fitting, fitted(model_nls2), col = "red")
+  
+  # find phenological dates, first make sure the dates found are for first crop, first or second half
+  firstHalf_dates <- which(ts_R$t >= risingLimb_start_DOY & ts_R$t <= risingLimb_end_DOY) # rising limb of first crop
+  t_firstHalf <- ts_R$t[firstHalf_dates]
+  fittedEVI_firstHalf <- fitted(model_nls2)[firstHalf_dates]
+  
+  secondHalf_dates <- which(ts_R$t >= fallingLimb_start_DOY & ts_R$t <= fallingLimb_end_DOY) # falling limb of first crop
+  t_secondHalf <- ts_R$t[secondHalf_dates]
+  fittedEVI_secondHalf <- fitted(model_nls2)[secondHalf_dates]
+  
+  firstCrop_dates <- which(ts_R$t >= risingLimb_start_DOY & ts_R$t <= fallingLimb_end_DOY) # first crop
+  t_firstCrop <- ts_R$t[firstCrop_dates]
+  fittedEVI_firstCrop <- fitted(model_nls2)[firstCrop_dates]
+  
+  # date and value of max EVI
+  maxEVI <- max(fittedEVI_firstCrop, na.rm = TRUE)
+  minEVI_left <- min(fittedEVI_firstHalf, na.rm = TRUE)
+  minEVI_right <- min(fittedEVI_secondHalf, na.rm = TRUE)
+  
+  date_min = approx(x = fittedEVI_firstCrop, y = t_firstCrop, xout = minEVI_left)$y
+  
+  # find phenological dates
+  rightOfPeakEVI <- 0.9*(maxEVI - minEVI_left) + minEVI_left
+  leftOfPeakEVI <- 0.9*(maxEVI - minEVI_right) + minEVI_right
+
+  date_rightOfPeak <- approx(x = fittedEVI_secondHalf, y = t_secondHalf, xout = rightOfPeakEVI)$y
+  date_leftOfPeak <- approx(x = fittedEVI_firstHalf, y = t_firstHalf, xout = leftOfPeakEVI)$y
+  
+  if (is.na(date_rightOfPeak)) {date_rightOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+  if (is.na(date_leftOfPeak)) {date_leftOfPeak <- mean(risingLimb_start_DOY, fallingLimb_end_DOY)}
+
+  midSeason <- mean(c(date_rightOfPeak, date_leftOfPeak))
+  quarter_period_comparable <- (midSeason - date_min)/2
+  
+  results <- c(midSeason, quarter_period_comparable)
+  names(results) <- c('midSeason', 'quarterPd_comparable')
+  
+  return(results)
+}
+
+# takes elimPoints, the vector of number of points to eliminate, and numRuns, the number of runs to do per number of points eliminated
+run_harmonic_TIMESAT_algorithm <- function(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+
+  # to hold results
+  peak_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  quarterPd_results <- matrix(nrow = numRuns, ncol = length(elimPoints))
+  
+  # run with appropriate number of missing points
+  for (numMissingPts_index in 1:length(elimPoints)) {
+    for (runIndex in 1:numRuns) {
+      
+      numMissingPts <- elimPoints[numMissingPts_index]
+      result <- harmonic_TIMESAT_algorithm(ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay)
+      
+      peak_results[runIndex, numMissingPts_index] <- result['midSeason']
+      quarterPd_results[runIndex, numMissingPts_index] <- result['quarterPd_comparable']
+    }
+  }
+  
+  peak_means <- colMeans(peak_results, na.rm = TRUE)
+  peak_sd <- apply(peak_results, 2, sd, na.rm = TRUE)
+  
+  quarterPd_means <- colMeans(quarterPd_results, na.rm = TRUE)
+  quarterPd_sd <- apply(quarterPd_results, 2, sd, na.rm = TRUE)
+  
+  # combine stats into named matrix
+  results <- matrix(c(peak_means, peak_sd, quarterPd_means, quarterPd_sd), ncol = length(elimPoints), byrow = TRUE)
+  rownames(results) <- c('peak_mean', 'peak_sd', 'quarterPd_mean', 'quarterPd_sd')
+  colnames(results) <- elimPoints
+  
+  return(results)
+}
+
+
+# change the smoothing, and plot how results change as data degrades
+# smoothing_names is the name to assign to each combo of smoothing windows
+# NOTE, the smoothing options are pairwise, NOT window_EVI_1_vector x window_EVI_2_vector
+test_smoothing_harmonic_TIMESAT <- function(ts, numRuns, elimPoints, window_EVI_1_vector, window_EVI_2_vector, smoothing_names, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay) {
+  
+  # add to this as get peak and quarter period results for each smoothing type
+  # jitter_amount is for plotting points that aren't completely overlaid on each other
+  plot_df <- data.frame(smoothing_name = character(0), eliminated_points = numeric(0), peak_mean = numeric(0), peak_sd = numeric(0),
+                        quarterPd_mean = numeric(0), quarterPd_sd = numeric(0), jitter_amount = numeric(0))
+  
+  for (smoothingIndex in 1:length(smoothing_names)) {
+    
+    # get the smoothing parameters
+    window_EVI_1 <- window_EVI_1_vector[smoothingIndex]
+    window_EVI_2 <- window_EVI_2_vector[smoothingIndex]
+    
+    smoothing_name <- smoothing_names[smoothingIndex]
+    
+    # run algorithm the appropriate number of times
+    results <- run_harmonic_TIMESAT_algorithm(ts, numRuns, elimPoints, window_EVI_1, window_EVI_2, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay)
+    plot_df <- rbind(plot_df, data.frame(smoothing_name = rep(smoothing_name, length(elimPoints)), eliminated_points = elimPoints, peak_mean = results['peak_mean',], peak_sd = results['peak_sd',], quarterPd_mean = results['quarterPd_mean',], quarterPd_sd = results['quarterPd_sd',], jitter_amount = rep(smoothingIndex/10, length(elimPoints))))
+    
+    plot(elimPoints, results['peak_mean',], main = paste0('mean peak for ', smoothing_name), ylab = 'peak [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['peak_mean',]-results['peak_sd',]), max(results['peak_mean',]+results['peak_sd',])))
+    arrows(elimPoints, results['peak_mean',]-results['peak_sd',], elimPoints, results['peak_mean',]+results['peak_sd',], length=0.05, angle=90, code=3)
+    
+    plot(elimPoints, results['quarterPd_mean',], main = paste0('mean quarterPd for ', smoothing_name), ylab = 'quarterPd [day]', xlab = 'num points eliminated',
+         ylim = c(min(results['quarterPd_mean',]-results['quarterPd_sd',]), max(results['quarterPd_mean',]+results['quarterPd_sd',])))
+    arrows(elimPoints, results['quarterPd_mean',]-results['quarterPd_sd',], elimPoints, results['quarterPd_mean',]+results['quarterPd_sd',], length=0.05, angle=90, code=3)
+  }
+  
+  plot_df$eliminated_points_toPlot <- plot_df$eliminated_points + plot_df$jitter_amount
+  
+  plot_df <- plot_df %>% group_by(smoothing_name)
+  
+  peak_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, peak_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, peak_mean, ymin = peak_mean - peak_sd, ymax = peak_mean + peak_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Peak, harmonic TIMESAT') +
+    xlab('Number of eliminated points') +
+    ylab('Peak DOY since Aug 1')
+    
+  quarterPd_summary_plot <- ggplot(plot_df) +
+    geom_line(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_point(data = plot_df, aes(eliminated_points_toPlot, quarterPd_mean, color = smoothing_name)) +
+    geom_errorbar(data = plot_df,
+                  aes(eliminated_points_toPlot, quarterPd_mean, ymin = quarterPd_mean - quarterPd_sd, ymax = quarterPd_mean + quarterPd_sd, color = smoothing_name),
+                  width = 0.4) +
+    ggtitle('Quarter period, harmonic TIMESAT') +
+    xlab('Number of eliminated points') +
+    ylab('Quarter period [days]')
+    
+  print(peak_summary_plot)
+  print(quarterPd_summary_plot)
+}
+
+
+#print(harmonic_TIMESAT_algorithm(ts, 20, 20, 0, 40, 140, 130, 240, '2016-09-01', '2017-07-01'))
+
+
+```
+
+
+## Computations for harmonic TIMESAT
+```{r}
+test_smoothing_harmonic_TIMESAT(ts, 5, seq(0, 10), c(0, 0, 20), c(0, 20, 20), c('no smoothing', 'half smoothing', 'full smoothing'), 50, 190, 170, 240, '2016-09-01', '2017-07-01')
+```

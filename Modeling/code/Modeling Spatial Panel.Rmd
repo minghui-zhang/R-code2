@@ -1,0 +1,556 @@
+---
+title: "Spatial Panel with splm"
+output: html_document
+---
+
+1. Spatial panel model with spml (spatial error and spatial lag models for all years)
+2. Model evaluation
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics)
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## functions
+
+```{r}
+# test the models
+test_plots <- function(model, model_name) {
+  
+  plot(model$residuals, main = paste("residual vs index", model_name))
+
+  plot(model$fitted.values, model$residuals, main = paste("fitted values vs residuals", model_name))
+  
+  # normal probability plot
+  qqnorm(model$residuals, pch = 1, frame = FALSE, main = model_name)
+  qqline(model$residuals, col = "steelblue", lwd = 2)
+}
+
+# add cell_ID
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+
+# plot data
+plot_cell_onset <- function(year, cell_data) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = onset)) +
+   scale_fill_viridis() +
+   ggtitle(paste("Onset for spatial panel", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_residuals <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = residuals)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "residuals for spatial panel", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_plant <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = plant)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "plant for spatial panel", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_tempAuto <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = dwi.autocorr.p.value)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "signif temporal autocorrelation for basic OLS", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+```
+
+
+## spatial panel model with all years, DC and SC fitted separately
+
+```{r}
+year_oi <- 2008 # this is only for visualization
+
+library(splm)
+library(plm)
+library(leaflet)
+
+# filter for only DC cells
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+cell_sf_tidy$plant_demeaned <- (cell_sf_tidy$plant - mean(cell_sf_tidy$plant, na.rm = TRUE))
+cell_sf_tidy$onset_demeaned <- cell_sf_tidy$onset - mean(cell_sf_tidy$onset, na.rm = TRUE)
+cell_sf_tidy$lat_demeaned <- cell_sf_tidy$lat - mean(cell_sf_tidy$lat, na.rm = TRUE)
+cell_sf_tidy$lon_demeaned <- cell_sf_tidy$lon - mean(cell_sf_tidy$lon, na.rm = TRUE)
+cell_sf_tidy$soyarea_demeaned <- cell_sf_tidy$soy_area_k - mean(cell_sf_tidy$soy_area_k, na.rm = TRUE)
+cell_sf_tidy$year_demeaned <- cell_sf_tidy$year_index - mean(cell_sf_tidy$year_index, na.rm = TRUE)
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy_DC <- cell_sf_tidy %>% 
+                    filter(intensity == "DC") 
+
+#filter out all cells where there isn't data for all years
+cells_list <- list()
+i <- 1
+for (year in c(2004:2014)) { # 2004:2014
+  cells_in_year <- cell_sf_tidy_DC[cell_sf_tidy_DC$year == year,]
+  cells_list[[i]] <- cells_in_year$cell_ID
+  i <- i + 1
+}
+full_data_cells <- Reduce(base::intersect, cells_list)
+cell_sf_tidy_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$cell_ID %in% full_data_cells, ]
+
+
+# calculate neighbors
+cell_sf_tidy_DC_year <- cell_sf_tidy_DC[cell_sf_tidy_DC$year == year_oi,]
+nb <- poly2nb(cell_sf_tidy_DC_year) # only for ONE year
+lw <- nb2listw(nb, zero.policy = TRUE) # listw object
+
+# get only the regions with links, redo neighbors calc, filter the data for all years accordingly
+cell_sf_tidy_DC_year <- cell_sf_tidy_DC_year[card(nb) != 0,]
+nb <- poly2nb(cell_sf_tidy_DC_year) # only for ONE year
+lw <- nb2listw(nb, zero.policy = TRUE) # listw object
+linked_cells <- cell_sf_tidy_DC_year$cell_ID
+cell_sf_tidy_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$cell_ID %in% linked_cells, ]
+cell_sf_tidy_DC <- cell_sf_tidy_DC[order(cell_sf_tidy_DC$year) , ] # re-order to match p.data.frame
+
+# convert data.frame to pdata.frame object to apply as panel data (use package plm)
+cell_tidy_DC_pdf <- pdata.frame(cell_sf_tidy_DC, c("cell_ID","year"))
+
+# data must be stacked first by time period and then by region
+# first index "year", second index "region" - i.e. have a column for region, then column for year
+cell_tidy_DC_pdfo <- cell_tidy_DC_pdf[order(cell_tidy_DC_pdf$year) , ] # pdata.frame
+
+# spml is the general wrapper function and the argument model controls the specification
+# model = "within" for fixed effects; "random" for random effects, "pooling" for no effects
+# spatial structure is specified by combining logical arguments lag (if TRUE, adds spatial autoregressive term in the dependent variable) and spatial.error (takes three values: "b", "kkp", or "none" for no spatial error correlation")
+
+# TEST: if de-meaned values help with zero mean residual
+
+
+cell_DC_model1 = spml(plant_demeaned ~ onset_demeaned + year_index + lat_demeaned, data=cell_tidy_DC_pdfo, listw=lw, 
+                    model = "random", lag = TRUE, spatial.error = "b") 
+#+ lat_demeaned + lon_demeaned + soyarea_demeaned + year_demeaned
+
+summary(cell_DC_model1)
+cell_sf_tidy_DC$residuals <- residuals(cell_DC_model1)
+cell_sf_tidy_DC$fitted.values <- fitted.values(cell_DC_model1)
+
+# this doesn't work, object lengths differ
+#cell_DC_model2 = spml(plant ~ onset, data=cell_tidy_DC_pdfo, listw=lw, effect = "individual", model="within", spatial.error="none", lag = T)
+
+
+#cell_DC_model3 = spml(plant ~ onset + lat + year, data=cell_tidy_DC_pdfo, listw=lw, 
+#                      model="pooling", effect = "twoways", lag=TRUE, spatial.error="kkp")
+
+
+# model evaluation: plant and onset maps (only those used in the actual modeling) --------------------------------------
+print(plot_cell_onset(year_oi, cell_sf_tidy_DC))
+print(plot_cell_plant(year_oi, cell_sf_tidy_DC, "DC"))
+
+# model evaluation: residual vs fitted value and vs index, and residual qq plot ----------------------------------------
+test_plots(cell_DC_model1, "model1 spatial panel")
+plot(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$fitted.values + mean(cell_sf_tidy_DC$plant), main = "spatial panel fitted value vs actual value of plant", ylab = "scaled fitted.values")
+abline(h = mean(cell_sf_tidy_DC$fitted.values + mean(cell_sf_tidy_DC$plant)), col = "blue")
+abline(v = mean(cell_sf_tidy_DC$plant), col = "blue")
+abline(0,1, col = "gray", lwd = 3)
+
+plot(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$residuals, main = "plant vs residuals")
+
+# model evaluation: residual map ---------------------------------------------------------------------------------------
+
+
+print(plot_cell_residuals(year_oi, cell_sf_tidy_DC, "DC"))
+
+# model evaluation: calculate R2 ---------------------------------------------------------------------------------------
+
+SST <- sum((cell_sf_tidy_DC$plant_demeaned - mean(cell_sf_tidy_DC$plant_demeaned))^2)
+SSE <- sum((cell_sf_tidy_DC$residuals - mean(cell_sf_tidy_DC$residuals))^2)
+R2 <- 1 - SSE/SST
+
+print(paste('R2:', R2))
+
+# model evaluation: correlations between plant and explanatory variables---------------
+print(paste("corr plant-onset", cor(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$onset)))
+print(paste("corr plant-lat", cor(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$lat)))
+print(paste("corr plant-year", cor(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$year)))
+print(paste('sd of fitted. values', sd(cell_sf_tidy_DC$fitted.values)))
+
+# multicollinearity: correlation between predictors
+predictors <- cell_sf_tidy_DC[,c("lat", "onset", "year")]
+st_geometry(predictors) <- NULL
+print(cor(predictors))
+
+
+# exogeneity
+plot(cell_sf_tidy_DC$onset, cell_sf_tidy_DC$residuals, main = "spatial panel, onset vs residual (exogeneity)")
+plot(cell_sf_tidy_DC$lat, cell_sf_tidy_DC$residuals, main = "spatial panel, latitude vs residual (exogeneity)")
+plot(cell_sf_tidy_DC$year, cell_sf_tidy_DC$residuals, main = "spatial sample, year vs residual (exogeneity)") 
+abline(h = 0)
+
+# model evaluation: see if basic OLS residuals are spatially autocorrelated with scatterplot -------------------------
+to_autocorrelation <- cell_sf_tidy_DC[cell_sf_tidy_DC$year == year_oi, ]
+nb <- poly2nb(to_autocorrelation)
+#resnb <- sapply(nb, function(x) mean(cell_sf_tidy$residuals[x]))
+#plot(cell_sf_tidy$residuals, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = "Basic OLS, all years")
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_residual <- moran.mc(to_autocorrelation$residuals, lw, 999, zero.policy = TRUE)
+print('moran I residual')
+print(moran_residual)
+moran_onset <- moran.mc(to_autocorrelation$onset, lw, 999, zero.policy = TRUE)
+print('moran I of onset with basic ols')
+print(moran_onset)
+moran_plant <- moran.mc(to_autocorrelation$plant, lw, 999, zero.policy = TRUE)
+print('moran I of plant')
+print(moran_plant)
+ 
+
+# percent of total data that's used in regression
+# full DC data:
+full_DC_cell_sf_tidy <- cell_sf_tidy %>% 
+                    filter(intensity == "DC") 
+print(paste('percent total data used:', 100*nrow(cell_sf_tidy_DC)/nrow(full_DC_cell_sf_tidy)))
+
+# # see if basic OLS residuals are temporally autocorrelated -----------------------------------------------------------
+# 
+# # create observation data frame, for DC only. 
+# # need to rename cell_ID so the same cell_ID can correspond to multiple years
+ DC_cell <- cell_sf_tidy_DC
+# 
+# # filter out all cells where there isn't data for all years
+ st_geometry(DC_cell) <- NULL
+ DC_cell <- DC_cell[complete.cases(DC_cell),]
+ cells_list <- list()
+ i <- 1
+ for (year in 2004:2014) {
+   cells_in_year <- DC_cell[DC_cell$year == year,]
+   cells_list[[i]] <- cells_in_year$label
+   i <- i + 1
+ }
+ full_data_cells <- Reduce(intersect, cells_list)
+DC_cell <- DC_cell[DC_cell$label %in% full_data_cells, ]
+ 
+ 
+ DC_nested_cell <- group_by(data.frame(DC_cell), label) %>% nest()
+ 
+ dwtest_one_cell <- function(data) {
+   dwtest(residuals ~ 1, data = data)
+ }
+ 
+ DC_cell <- DC_nested_cell %>%
+   mutate(dwtest = map(data, dwtest_one_cell)) %>%
+   mutate(test_df = map(dwtest, tidy)) %>%
+   unnest(test_df)
+ 
+# calculate proportion of p values below 5% significance, with Bonferroni correction
+
+DC_percent_auto <- mean(DC_cell$p.value < 0.05/nrow(DC_cell)) * 100
+
+print(paste('percent p values below 5% significance with Bonferroni correction', DC_percent_auto))
+
+# plot areas with temporal autocorrelation in residuals
+# DC
+DC_temporalAuto <- as.data.frame(DC_cell[, c("label", "p.value")]) %>%
+                      mutate(dwi.autocorr.p.value = p.value)
+cell_sf_tidy_DC_tmp <- merge(cell_sf_tidy_DC, DC_temporalAuto)
+cell_DC_tempAuto <- cell_sf_tidy_DC_tmp %>%
+                      filter(dwi.autocorr.p.value < 0.05)
+
+# DC
+plot_cell_tempAuto(year_oi, cell_DC_tempAuto, "DC")
+ 
+ plot(cell_sf_tidy_DC$year, cell_sf_tidy_DC$residuals) 
+ abline(h = 0)
+ 
+# print map to show cell_ID, for plotting residual, onset and plant over time
+
+# pal <- colorNumeric(
+#   palette = "YlGnBu",
+#   domain = cell_DC_tempAuto$dwi.autocorr.p.value
+# )
+# 
+# leaflet(cell_DC_tempAuto) %>%
+#   addTiles() %>%
+#   addPolygons(weight = 0.1,
+#     color = ~pal(dwi.autocorr.p.value),
+#               popup = cell_DC_tempAuto$cell_ID) %>%
+#   addLegend("bottomright", 
+#             pal = pal,
+#             values = ~dwi.autocorr.p.value,
+#             title = "dwi.autocorr.p.value",
+#             opacity = 1
+# )
+#  
+# cell_ID_oi <- "+3895+4563"
+# 
+# specific_cell <- cell_sf_tidy_DC %>% 
+#                     filter(cell_ID == cell_ID_oi)
+# 
+# plot(specific_cell$year, specific_cell$residuals, type = "l", col = "red", lwd = 2.5,
+#      ylim = c(-30, 50), ylab = "day", xlab = "year",
+#      main = paste("spatial panel for cell", cell_ID_oi))
+# lines(specific_cell$year, specific_cell$plant_demeaned, col = "green")
+# lines(specific_cell$year, specific_cell$onset_demeaned, col = "blue")
+# legend(2004, 50, legend=c("residual", "plant demeaned", "onset demeaned"),
+#        col=c("red", "green", "blue"), lty=c(1,1,1))
+```
+## evaluate predictions
+
+```{r}
+
+# runs the model with options to eliminate a year
+run_model <- function(full_data, weights, year_to_elim, elim_year) {
+  
+  # separate training and test data
+  if (elim_year) {
+    train_data <- full_data[full_data$year != year_to_elim,]
+    test_data <- full_data[full_data$year == year_to_elim,]
+  }
+  else {
+    train_data <- full_data
+    test_data <- full_data
+  }
+  
+  # recalculate demeaned values for train and test data
+  train_data$plant_demeaned <- (train_data$plant - mean(train_data$plant, na.rm = TRUE))
+  train_data$onset_demeaned <- (train_data$onset - mean(train_data$onset, na.rm = TRUE))
+  train_data$lat_demeaned <- (train_data$lat - mean(train_data$lat, na.rm = TRUE))
+  
+  test_data$plant_demeaned <- (test_data$plant - mean(test_data$plant, na.rm = TRUE))
+  test_data$onset_demeaned <- (test_data$onset - mean(test_data$onset, na.rm = TRUE))
+  test_data$lat_demeaned <- (test_data$lat - mean(test_data$lat, na.rm = TRUE))
+  
+  model = spml(plant_demeaned ~ onset_demeaned + year_index + lat_demeaned, data=train_data, listw=weights, 
+                    model = "random", lag = TRUE, spatial.error = "b") 
+  model_intercept = lm(plant_demeaned ~ 1, data=train_data) 
+  
+  print(paste('finished model for year', year_to_elim))
+  
+  # extract onset coef and R2 from model
+  onset_coef <- model$coefficients['onset_demeaned']
+  year_coef <- model$coefficients['year_index']
+  lat_coef <- model$coefficients['lat_demeaned']
+  intercept <- model$coefficients['(Intercept)']
+  
+  train_data$residuals <- residuals(model)
+  SST <- sum((train_data$plant - mean(train_data$plant))^2)
+  SSE <- sum((train_data$residuals - mean(train_data$residuals))^2)
+  R2 <- 1 - SSE/SST
+  
+  # prediction
+  prediction_demeaned <- intercept + onset_coef*test_data$onset_demeaned + year_coef*test_data$year_index + lat_coef*test_data$lat_demeaned
+  error <- rmse(prediction_demeaned, test_data$plant_demeaned)
+  
+  # intercept only model
+  prediction_intercept <- rep(0, length(test_data$plant_demeaned)) # everything was demeaned
+  
+  print(paste('prediction intercept', prediction_intercept))
+  error_intercept <- rmse(prediction_intercept, test_data$plant_demeaned)
+  
+  diff_error <- error_intercept - error
+  
+  # output
+  output <- c(as.integer(year_to_elim), onset_coef, R2, error, diff_error)
+  names(output) <- c("eliminated_year", "onset", "R2", "RMSE", "RMSE_improvement")
+
+  return(output)
+}
+
+prediction_results <- data.frame()
+
+for (year in 2004:2014) {
+  
+  result <- run_model(cell_tidy_DC_pdfo, lw, year, TRUE)
+  prediction_results <- rbind(prediction_results, result)
+}
+
+names(prediction_results) <- names(result)
+
+plot(prediction_results$eliminated_year, prediction_results$RMSE, 
+     ylab = "RMSE", xlab = "eliminated year", type = "l", ylim = c(5, 25), main = "Prediction RMSE, spatial panel")
+
+plot(prediction_results$eliminated_year, prediction_results$RMSE_improvement, 
+     ylab = "RMSE", xlab = "eliminated year", type = "l", ylim = c(0, 10), main = "Prediction RMSE improvement over intercept, spatial panel")
+
+plot(prediction_results$eliminated_year, prediction_results$onset, type = "l", col = "red", ylab = "coef or R2", xlab = "eliminated year", ylim = c(0, 0.7), main = "Prediction onset and R2, spatial panel")
+lines(prediction_results$eliminated_year, prediction_results$R2, col = "blue")
+legend(2004, 0.65, legend = c("onset coef", "R2"), col = c("red", "blue"), lty= c(1,1))
+
+```
+
+## spatial panel model with one year, DC and SC fitted separately
+
+```{r}
+# 
+# year_oi <- 2008 # this is for fitting
+# 
+# library(splm)
+# library(plm)
+# library(leaflet)
+# 
+# # filter for only DC cells
+# cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+# 
+# cell_sf_tidy$plant_demeaned <- (cell_sf_tidy$plant - mean(cell_sf_tidy$plant, na.rm = TRUE))#/sd(cell_sf_tidy$plant, na.rm = TRUE)
+# cell_sf_tidy$onset_demeaned <- (cell_sf_tidy$onset - mean(cell_sf_tidy$onset, na.rm = TRUE))#/sd(cell_sf_tidy$onset - mean(cell_sf_tidy$onset, na.rm = TRUE))
+# cell_sf_tidy$lat_demeaned <- (cell_sf_tidy$lat - mean(cell_sf_tidy$lat, na.rm = TRUE))#/sd(cell_sf_tidy$lat, na.rm = TRUE)
+# 
+# cell_sf_tidy_DC <- cell_sf_tidy %>% 
+#                     filter(intensity == "DC") %>%
+#                     filter(year == year_oi)
+# 
+# # calculate neighbors
+# nb <- poly2nb(cell_sf_tidy_DC) # only for ONE year
+# lw <- nb2listw(nb, zero.policy = TRUE) # listw object
+# 
+# # get only the regions with links, redo neighbors calc, filter the data for all years accordingly
+# cell_sf_tidy_DC <- cell_sf_tidy_DC[card(nb) != 0,]
+# nb <- poly2nb(cell_sf_tidy_DC) # only for ONE year
+# lw <- nb2listw(nb, zero.policy = TRUE) # listw object
+# linked_cells <- cell_sf_tidy_DC$cell_ID
+# cell_sf_tidy_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$cell_ID %in% linked_cells, ]
+# cell_sf_tidy_DC <- cell_sf_tidy_DC[order(cell_sf_tidy_DC$year) , ] # re-order to match p.data.frame
+# 
+# # convert data.frame to pdata.frame object to apply as panel data (use package plm)
+# cell_tidy_DC_pdf <- pdata.frame(cell_sf_tidy_DC, c("cell_ID","year"))
+# 
+# # data must be stacked first by time period and then by region
+# # first index "year", second index "region" - i.e. have a column for region, then column for year
+# cell_tidy_DC_pdfo <- cell_tidy_DC_pdf[order(cell_tidy_DC_pdf$year) , ] # pdata.frame
+# 
+# # spml is the general wrapper function and the argument model controls the specification
+# # model = "within" for fixed effects; "random" for random effects, "pooling" for no effects
+# # spatial structure is specified by combining logical arguments lag (if TRUE, adds spatial autoregressive term in the dependent variable) and spatial.error (takes three values: "b", "kkp", or "none" for no spatial error correlation")
+# cell_DC_model1 = spml(plant_demeaned ~ onset_demeaned + lat_demeaned, data=cell_tidy_DC_pdfo, listw=lw, 
+#                     model = "random", lag = TRUE, spatial.error = "b")
+# 
+# summary(cell_DC_model1)
+# cell_sf_tidy_DC$residuals <- residuals(cell_DC_model1)
+# cell_sf_tidy_DC$fitted.values <- fitted.values(cell_DC_model1)
+# 
+# # model evaluation: plant and onset maps (only those used in the actual modeling) --------------------------------------
+# print(plot_cell_onset(year_oi, cell_sf_tidy_DC))
+# print(plot_cell_plant(year_oi, cell_sf_tidy_DC, "DC"))
+# 
+# # model evaluation: residual vs fitted value and vs index, and residual qq plot ----------------------------------------
+# test_plots(cell_DC_model1, "model1 spatial panel")
+# plot(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$fitted.values + mean(cell_sf_tidy_DC$plant), main = "spatial panel fitted value vs actual value of plant", ylab = "scaled fitted.values")
+# 
+# # model evaluation: residual map ---------------------------------------------------------------------------------------
+# 
+# print(plot_cell_residuals(year_oi, cell_sf_tidy_DC, "DC"))
+# 
+# # model evaluation: calculate R2 ---------------------------------------------------------------------------------------
+# 
+# SST <- sum((cell_sf_tidy_DC$plant_demeaned - mean(cell_sf_tidy_DC$plant_demeaned))^2)
+# SSE <- sum((cell_sf_tidy_DC$residuals - mean(cell_sf_tidy_DC$residuals))^2)
+# R2 <- 1 - SSE/SST
+# 
+# print(paste('R2:', R2))
+# 
+# # model evaluation: correlations between plant and explanatory variables---------------
+# print(paste("corr plant-onset", cor(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$onset)))
+# print(paste("corr plant-lat", cor(cell_sf_tidy_DC$plant, cell_sf_tidy_DC$lat)))
+# print(paste('sd of fitted.values', sd(cell_sf_tidy_DC$fitted.values)))
+# 
+# plot(cell_sf_tidy_DC$onset, cell_sf_tidy_DC$residuals, main = "spatial panel, onset vs residual (exogeneity)")
+# plot(cell_sf_tidy_DC$lat, cell_sf_tidy_DC$residuals, main = "spatial panel, latitude vs residual (exogeneity)")
+# plot(cell_sf_tidy_DC$year, cell_sf_tidy_DC$residuals, main = "spatial sample, year vs residual (exogeneity)") 
+# abline(h = 0)
+# 
+# # model evaluation: see if basic OLS residuals are spatially autocorrelated with scatterplot -------------------------
+# 
+# nb <- poly2nb(cell_sf_tidy_DC)
+# #resnb <- sapply(nb, function(x) mean(cell_sf_tidy$residuals[x]))
+# #plot(cell_sf_tidy$residuals, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = "Basic OLS, all years")
+# lw <- nb2listw(nb, zero.policy = TRUE)
+# moran_basic_ols <- moran.mc(cell_sf_tidy_DC$residuals, lw, 999, zero.policy = TRUE)
+# print('moran with basic ols, all years')
+# print(moran_basic_ols)
+#  
+# # percent of total data that's used in regression
+# print(paste('percent total data used:', 100*nrow(cell_sf_tidy_DC)/nrow(cell_sf_tidy)))
+# 
+```
+
+
+## export
+
+```{r}
+# for app.R
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na %>%
+                              mutate(year_factor = as.factor(year))
+saveRDS(as(cell_sf_tidy, 'Spatial'), "./cell_spdf.rds")
+```

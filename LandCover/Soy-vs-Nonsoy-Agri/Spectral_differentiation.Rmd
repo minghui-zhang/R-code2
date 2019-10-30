@@ -1,0 +1,94 @@
+---
+title: "Spectral_differentiation"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+
+#setwd("~/Documents/R-code/LandCover/Soy-vs-Nonsoy-Agri")
+agsat_raw <- read.csv("modis_table_agsat_partial.csv")
+plos_raw <- read.csv("modis_table_plos_partial.csv")
+
+year <- 2015
+
+```
+
+## Functions
+
+```{r functions}
+# turns date in millis into date
+ms_to_date = function(ms, t0="1970-01-01", timezone) {
+  sec = ms / 1000
+  as.POSIXct(sec, origin=t0, tz=timezone)
+}
+
+# take raw data and add class as factor, clean up date columns
+clean_raw_data = function(data_raw, year) {
+  
+  # turn class into a factor
+  data_raw$class <- as.factor(data_raw$class)
+  
+  # specify that original 'year' in data is actually harvest year
+  data_raw$harvest_year <- data_raw$year
+  data <- select(data_raw, -year)
+  
+  data_year <- data[data$harvest_year == year,]
+  
+  # turn system.time_start into date, month, day
+  data_year$date <- ms_to_date(data_year$system.time_start, timezone="America/Los_Angeles")
+  data_year$month <- month(data_year$date)
+  
+  # remove data with no month 
+  data_year <- data_year[complete.cases(data_year$month),]
+
+  return(data_year)
+}
+```
+
+## Computations
+
+```{r computations}
+agsat <- clean_raw_data(agsat_raw, year)
+plos <- clean_raw_data(plos_raw, year)
+
+```
+
+## Plots
+```{r plots}
+
+scatterplot <- function(band1, band2, band1_name, band2_name, year, data_frame, data_name) {
+  plot <- ggplot(data = data_frame, aes(x = band1, y = band2, col = class)) +
+                  geom_point(alpha = 0.5) +
+                  facet_wrap(vars(month)) +
+                  geom_smooth(method = "lm") +
+                  ggtitle(paste(band1, "vs", band2,"for", data_name, "year", year)) +
+                  xlab(band1_name) + ylab(band2_name)
+  return(plot)
+}
+
+print(scatterplot(agsat$sur_refl_b01, agsat$sur_refl_b02, 'band1', 'band2' , year, agsat, "agsat"))
+
+```
+
+```{r}
+agsat_plot <- ggplot(data = agsat, aes(x = sur_refl_b01, y = sur_refl_b02, col = class)) +
+                  geom_point(alpha = 0.5) +
+                  #facet_wrap(vars(month)) +
+                  geom_smooth(method = "lm") +
+                  ggtitle(paste0("Band 1 vs Band 2 for agsat, year ", year))
+
+plos_plot <- ggplot(data = plos, aes(x = sur_refl_b01, y = sur_refl_b02, col = class)) +
+                  geom_point(alpha = 0.5) +
+                  #facet_wrap(vars(month)) +
+                  geom_smooth(method = "lm") +
+                  ggtitle(paste0("Band 1 vs Band 2 for plos, year ", year))
+
+#print(agsat_plot)
+#print(plos_plot)
+```
+

@@ -1,0 +1,901 @@
+---
+title: "Spatial Sampling, then OLS"
+output: html_document
+---
+
+1. Sample cells at 100km distance to skip spatial autocorrelation
+2. Regular OLS
+3. Model evaluation.
+4. Repeat above for consistency
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics) # for rmse
+library(leaflet)
+library(leaps) # stepwise model selection
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+source('E:/R-code/Modeling/code/FCN_plotting.R')
+source('E:/R-code/Modeling/code/FCN_sample_data.R')
+source('E:/R-code/Modeling/code/FCN_run_model_spatial_sampled.R')
+
+onset_type <- 'AA_25_persiann_ATgabriel25km'
+
+filename_median <- paste0('E:/R-code/Modeling/data/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+filename_percentile5 <- paste0('E:/R-code/Modeling/data/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
+filename_percentile95 <- paste0('E:/R-code/Modeling/data/data_onset_', onset_type, '/percentile95_onset_cell_', onset_type, '.csv')
+filename_shp<- paste0('E:/R-code/Modeling/data/data_onset_', onset_type, '/shp')
+layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+median_cell_raw <- read.csv(filename_median)
+percentile5_cell_raw <- read.csv(filename_percentile5)
+percentile95_cell_raw <- read.csv(filename_percentile95)
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+
+
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile95_cell <- percentile95_cell_raw %>% rename_cols_percentile_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+
+cell_sf_percentile95 <- cell_sf
+cell_sf_percentile95$SC_plant <- percentile95_cell$SC_plant
+cell_sf_percentile95$DC_plant <- percentile95_cell$DC_plant
+cell_sf_percentile95$plant_stat_type <- rep("percentile95", nrow(cell_sf_percentile95))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile95)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+
+# plotting
+year <- 2013
+cell_year <- cell_sf_tidy[cell_sf_tidy$year == year, ]
+  
+onset_map <- ggplot(cell_year) +
+  geom_sf(aes(fill = onset)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Onset for spatial sampling", year, onset_type)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+print(onset_map)
+  
+```
+
+
+## model selection
+
+```{r}
+
+# to store data for best predictors for each grid offset
+predictors_for_offsets <- c()
+
+
+for (lat_offset in seq(0, 1.5, by = 0.25)) { # 0 to 1.5
+      for (lon_offset in seq(0, 1.5, by = 0.25)) { # 0 to 1.5
+  
+  grid_size = 0.75
+  agg_scheme = FALSE
+
+  # select the data according to offset
+  # get sampled data.
+  sampled_data <- get_sampled_data(full_data = cell_sf_tidy, plant_stat = "median", grid_size = grid_size, 
+                                   lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                                   plot_samples = FALSE, year_oi = 2008)      
+        
+  # get the best predictors
+  chosen_predictors <- stepwise_model_selection(max_variables = 6,
+                           y.var = "plant",
+                           predictor_pool <- c("onset", "intensity", # these must be included
+                                                "year_index", "lat", "lon", "region", 
+                                                "onset:intensity", "onset:lat", "onset:year_index", "onset:region"),
+                           data = sampled_data
+                      )
+
+  predictors_for_offsets <- c(predictors_for_offsets, chosen_predictors)
+
+  }
+}
+
+# list the nubmer of times each predictor shows up
+print(sort(table(predictors_for_offsets)))
+```
+
+
+## thresholds part 2: see if coefs are different for different plant_stat_types
+
+```{r}
+
+# see if onset coef is statistically different for the different plant_stat_types
+agg_scheme = FALSE
+do_elim_year = FALSE
+grid_size = 0.75
+onset_results <- data.frame() # to save which grid offsets give a significant difference in onset coef between median and percentile plant
+grid_index = 0
+for (lat_offset in seq(0, 1.5, by = 0.75)) { # 0 to 1.5
+    for (lon_offset in seq(0, 1.5, by = 0.75)) { # 0 to 1.5
+      
+      grid_index = grid_index + 1 # to keep track for plotting
+      
+      # run OLS for median, percentile plants
+      median_output <- run_OLS(full_data = cell_sf_tidy, 
+                              predictors = c("onset", "intensity",
+                                "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                ), 
+                          y.var = "plant", plant_stat = "median",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+      
+      percentile95_output <- run_OLS(full_data = cell_sf_tidy, 
+                              predictors = c("onset", "intensity",
+                                "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                ), 
+                          y.var = "plant", plant_stat = "percentile95",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+      
+      percentile5_output <- run_OLS(full_data = cell_sf_tidy, 
+                              predictors = c("onset", "intensity",
+                                "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                ), 
+                          y.var = "plant", plant_stat = "percentile5",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+      
+      # get onset coefficients and see if statistically different
+      output <- data.frame(onset_coef = c(median_output$onset_coef, 
+                                          percentile95_output$onset_coef, percentile5_output$onset_coef),
+                           onset_stderr = c(median_output$onset_std_error, 
+                                            percentile95_output$onset_std_error, percentile5_output$onset_std_error),
+                           intensity_coef = c(median_output$intensity_coef, 
+                                          percentile95_output$intensity_coef, percentile5_output$intensity_coef),
+                           intensity_stderr = c(median_output$intensity_std_error, 
+                                            percentile95_output$intensity_std_error, 
+                                            percentile5_output$intensity_std_error),
+                           lat_coef = c(median_output$lat_coef, 
+                                          percentile95_output$lat_coef, percentile5_output$lat_coef),
+                           lat_stderr = c(median_output$lat_std_error, 
+                                            percentile95_output$lat_std_error, 
+                                            percentile5_output$lat_std_error),
+                           year_coef = c(median_output$year_coef, 
+                                          percentile95_output$year_coef, percentile5_output$year_coef),
+                           year_stderr = c(median_output$year_std_error, 
+                                            percentile95_output$year_std_error, 
+                                            percentile5_output$year_std_error),
+                           plant_stat_type = c("median", "percentile95", "percentile5"),
+                           grid = c(grid_index, grid_index, grid_index))
+      onset_results <- rbind(onset_results, output)
+      
+  }
+}
+
+names(onset_results) <- c('onset_coef', 'onset_stderr', 'intensity_coef', 'intensity_stderr',
+                          'lat_coef', 'lat_stderr', 'year_coef', 'year_stderr',
+                          'plant_stat_type', 'grid_index')
+
+ggplot(onset_results, aes(x = grid_index, y = onset_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = onset_coef - onset_stderr, ymax = onset_coef + onset_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = intensity_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = intensity_coef - intensity_stderr, ymax = intensity_coef + intensity_stderr)) +
+    ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = lat_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = lat_coef - lat_stderr, ymax = lat_coef + lat_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = year_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = year_coef - year_stderr, ymax = year_coef + year_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+```
+
+
+## thresholds part 3: see if coefs are different when modeling SC and DC separately
+
+```{r}
+
+# see if onset coef is statistically different if model SC and DC in different models
+
+# run model for only SC and only DC
+cell_sf_tidy_SC <- cell_sf_tidy[cell_sf_tidy$intensity == "SC",]
+cell_sf_tidy_DC <- cell_sf_tidy[cell_sf_tidy$intensity == "DC",]
+
+agg_scheme = FALSE
+do_elim_year = FALSE
+onset_results <- data.frame() # to save which grid offsets give a significant difference in onset coef between median and percentile plant
+grid_index = 0
+for (lat_offset in seq(0, 1.5, by = 0.5)) { # 0 to 1.5
+    for (lon_offset in seq(0, 1.5, by = 0.5)) { # 0 to 1.5
+      
+      grid_index = grid_index + 1 # to keep track for plotting
+      
+      # run OLS for median, percentile plants
+      model_output_SC <- run_OLS(full_data = cell_sf_tidy_SC,
+                        predictors = c("onset",
+                                "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                          ),
+                    y.var = "plant", plant_stat = "median",
+                    grid_size = 0.75, 
+                    lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                    plot_samples = FALSE, plot_model_evals = FALSE,
+                    year_oi = 2012, do_elim_year = do_elim_year, chosen_intensity = "SC")
+      
+      
+      model_output_DC <- run_OLS(full_data = cell_sf_tidy_DC,
+                        predictors = c("onset",
+                                "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                          ),
+                    y.var = "plant", plant_stat = "median", 
+                    grid_size = 0.75,
+                    lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                    plot_samples = FALSE, plot_model_evals = FALSE,
+                    year_oi = 2012, do_elim_year = do_elim_year, chosen_intensity = "DC")
+      
+      
+      # get onset coefficients and see if statistically different
+      output <- data.frame(onset_coef = c(model_output_SC$onset_coef, model_output_DC$onset_coef),
+                           onset_stderr = c(model_output_SC$onset_std_error, model_output_DC$onset_std_error),
+                           lat_coef = c(model_output_SC$lat_coef, model_output_DC$lat_coef),
+                           lat_stderr = c(model_output_SC$lat_std_error, model_output_DC$lat_std_error),
+                           year_coef = c(model_output_SC$year_coef, model_output_DC$year_coef),
+                           year_stderr = c(model_output_SC$year_std_error, model_output_DC$year_std_error),
+                           plant_stat_type = c("SC", "DC"),
+                           grid = c(grid_index, grid_index))
+      
+      onset_results <- rbind(onset_results, output)
+      
+  }
+}
+
+names(onset_results) <- c('onset_coef', 'onset_stderr', 
+                          'lat_coef', 'lat_stderr', 'year_coef', 'year_stderr',
+                          'plant_stat_type', 'grid_index')
+
+ggplot(onset_results, aes(x = grid_index, y = onset_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = onset_coef - onset_stderr, ymax = onset_coef + onset_stderr)) +
+  geom_point(size = 3) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = lat_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = lat_coef - lat_stderr, ymax = lat_coef + lat_stderr)) +
+  geom_point(size = 3) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = year_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = year_coef - year_stderr, ymax = year_coef + year_stderr)) +
+  geom_point(size = 3) +
+  theme_bw()
+
+```
+
+## thresholds part 4: see if coefs are different when modeling southern, northern, and all cells separately
+
+```{r}
+
+# run model for only north and only south
+cell_sf_tidy_north <- cell_sf_tidy[cell_sf_tidy$region != "south",]
+cell_sf_tidy_south <- cell_sf_tidy[cell_sf_tidy$region == "south",]
+
+agg_scheme = FALSE
+do_elim_year = FALSE
+grid_size = 0.75
+onset_results <- data.frame() # to save which grid offsets give a significant difference in onset coef between median and percentile plant
+grid_index = 0
+
+
+for (lat_offset in seq(0, 1.5, by = 0.25)) { # 0 to 1.5
+    for (lon_offset in seq(0, 1.5, by = 0.25)) { # 0 to 1.5
+      
+      grid_index = grid_index + 1 # to keep track for plotting
+      
+      # run OLS for all, north and south cells
+
+      # all_output <- run_OLS(full_data = cell_sf_tidy,
+      #                         predictors = c("onset", "intensity",
+      #                           "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+      #                           "year_index" # for time effects
+      #                           ),
+      #                     y.var = "plant", plant_stat = "median",
+      #                     grid_size = grid_size,
+      #                     lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme,
+      #                     plot_samples = FALSE, plot_model_evals = FALSE,
+      #                     year_oi = 2007,
+      #                     do_elim_year = do_elim_year,
+      #                     chosen_intensity = "DC")
+            
+      north_output <- run_OLS(full_data = cell_sf_tidy_north, 
+                              predictors = c("onset", "intensity",
+                                "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                ), 
+                          y.var = "plant", plant_stat = "median",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+      
+      south_output <- run_OLS(full_data = cell_sf_tidy_south, 
+                              predictors = c("onset", "intensity",
+                                "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                ), 
+                          y.var = "plant", plant_stat = "median",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+
+      # get onset coefficients and see if statistically different
+      output <- data.frame(onset_coef = c(north_output$onset_coef, south_output$onset_coef),
+                           onset_stderr = c(north_output$onset_std_error, south_output$onset_std_error),
+                           intensity_coef = c(north_output$intensity_coef, south_output$intensity_coef),
+                           intensity_stderr = c(north_output$intensity_std_error, 
+                                            south_output$intensity_std_error),
+                           lat_coef = c(north_output$lat_coef, south_output$lat_coef),
+                           lat_stderr = c(north_output$lat_std_error, 
+                                            south_output$lat_std_error),
+                           year_coef = c(north_output$year_coef, south_output$year_coef),
+                           year_stderr = c(north_output$year_std_error, 
+                                            south_output$year_std_error),
+                           plant_stat_type = c("north", "south"),
+                           grid = c(grid_index, grid_index))
+      onset_results <- rbind(onset_results, output)
+      
+  }
+}
+
+names(onset_results) <- c('onset_coef', 'onset_stderr', 'intensity_coef', 'intensity_stderr',
+                          'lat_coef', 'lat_stderr', 'year_coef', 'year_stderr',
+                          'plant_stat_type', 'grid_index')
+
+ggplot(onset_results, aes(x = grid_index, y = onset_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = onset_coef - onset_stderr, ymax = onset_coef + onset_stderr)) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = intensity_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = intensity_coef - intensity_stderr, ymax = intensity_coef + intensity_stderr)) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = lat_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = lat_coef - lat_stderr, ymax = lat_coef + lat_stderr)) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = year_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = year_coef - year_stderr, ymax = year_coef + year_stderr)) +
+  theme_bw()
+```
+
+
+
+## test model result when onset is jumbled
+
+```{r}
+# jumble the onset for all cells
+cell_sf_tidy$onset_random <- sample(cell_sf_tidy$onset, replace = FALSE)
+
+# run model of all cells with onset and onset_random
+ordered.formula.string <- paste("plant", paste(c("onset", "intensity", "lat", "lon", "year_index"), collapse = " + "), sep = " ~ ")
+ordered.f <- as.formula(ordered.formula.string)
+  
+ordered_model = lm(ordered.f, data=cell_sf_tidy) 
+ordered_coefficients <- ordered_model$coefficients
+ordered_std_errors <- summary(before_model)$coefficients[,2]
+
+ordered_results <- data.frame(variable = c("onset", "intensity", "lat", "year"),
+                              coef = c(ordered_coefficients["onset"], ordered_coefficients["intensitySC"],
+                                       ordered_coefficients["lat"], ordered_coefficients["year_index"]),
+                              std_error = c(ordered_std_errors["onset"], ordered_std_errors["intensitySC"],
+                                            ordered_std_errors["lat"], ordered_std_errors["year_index"]))
+
+random.formula.string <- paste("plant", paste(c("onset_random", "intensity", "lat", "lon", "year_index"), collapse = " + "), sep = " ~ ")
+random.f <- as.formula(random.formula.string)
+
+  
+random_model = lm(random.f, data=cell_sf_tidy) 
+random_coefficients <- random_model$coefficients
+random_std_errors <- summary(random_model)$coefficients[,2]
+
+random_results <- data.frame(variable = c("onset", "intensity", "lat", "year"),
+                              coef = c(random_coefficients["onset_random"], random_coefficients["intensitySC"],
+                                       random_coefficients["lat"], random_coefficients["year_index"]),
+                              std_error = c(random_std_errors["onset_random"], random_std_errors["intensitySC"],
+                                            random_std_errors["lat"], random_std_errors["year_index"]))
+
+# run model of cells with planting before onset
+cell_sf_tidy_before <- cell_sf_tidy[cell_sf_tidy$beforeonset == 1 & cell_sf_tidy$plant_stat_type == "median",]
+
+ordered_model = lm(ordered.f, data=cell_sf_tidy_before) 
+ordered_coefficients <- ordered_model$coefficients
+ordered_std_errors <- summary(before_model)$coefficients[,2]
+
+ordered_results <- data.frame(variable = c("onset", "intensity", "lat", "year"),
+                              coef = c(ordered_coefficients["onset"], ordered_coefficients["intensitySC"],
+                                       ordered_coefficients["lat"], ordered_coefficients["year_index"]),
+                              std_error = c(ordered_std_errors["onset"], ordered_std_errors["intensitySC"],
+                                            ordered_std_errors["lat"], ordered_std_errors["year_index"]))
+
+random_model = lm(random.f, data=cell_sf_tidy_before) 
+random_coefficients <- random_model$coefficients
+random_std_errors <- summary(random_model)$coefficients[,2]
+
+random_results <- data.frame(variable = c("onset", "intensity", "lat", "year"),
+                              coef = c(random_coefficients["onset_random"], random_coefficients["intensitySC"],
+                                       random_coefficients["lat"], random_coefficients["year_index"]),
+                              std_error = c(random_std_errors["onset_random"], random_std_errors["intensitySC"],
+                                            random_std_errors["lat"], random_std_errors["year_index"]))
+
+print('ordered')
+print(ordered_results)
+print('random')
+print(random_results)
+
+```
+
+
+## thresholds part 5: patterns in percent planted before onset
+
+```{r}
+
+# label which cells were planted before onset
+cell_sf_tidy$beforeonset <- ifelse(cell_sf_tidy$onset > cell_sf_tidy$plant, 1, 0)
+
+# distributions
+ggplot(cell_sf_tidy, aes(x = plant)) +
+  geom_histogram(data = subset(cell_sf_tidy, beforeonset == 1), fill = "red") +
+  geom_histogram(data = subset(cell_sf_tidy, beforeonset == 0), fill = "gray", alpha = 0.3) +
+  facet_wrap(~ year_factor) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(cell_sf_tidy, aes(x = delay)) +
+  geom_histogram(data = subset(cell_sf_tidy, beforeonset == 1), fill = "red") +
+  geom_histogram(data = subset(cell_sf_tidy, beforeonset == 0), fill = "gray", alpha = 0.3) +
+  facet_wrap(~ year_factor) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+# percent of people planting before onset
+cell_df_tidy <- cell_sf_tidy %>% st_set_geometry(NULL)
+
+cell_df_tidy_byYear <- cell_df_tidy %>% 
+  group_by(year) %>%
+  summarize(num_before_onset = sum(beforeonset, na.rm = TRUE),
+            total_cells = length(which(!is.na(beforeonset))),
+            mean_onset = mean(onset[which(!is.na(beforeonset))])) %>% # mean onset ONLY ON CELLS WITH SOY
+  mutate(percent_before_onset = 100*num_before_onset/total_cells)
+
+cell_df_tidy_byRegion <- cell_df_tidy %>% 
+  group_by(region) %>%
+  summarize(num_before_onset = sum(beforeonset, na.rm = TRUE),
+            total_cells = length(which(!is.na(beforeonset))),
+            mean_onset = mean(onset[which(!is.na(beforeonset))])) %>% # mean onset ONLY ON CELLS WITH SOY
+  mutate(percent_before_onset = 100*num_before_onset/total_cells)
+
+ggplot(cell_df_tidy_byYear, aes(x = mean_onset, y = percent_before_onset)) +
+  geom_point() +
+  geom_text(aes(label=year),hjust=0, vjust=0) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(cell_df_tidy_byYear, aes(x = year, y = percent_before_onset)) +
+  geom_point() +
+  ggtitle(onset_type) +
+  theme_bw()
+
+# check to see if onset coef is different for cells planted before vs after onset
+# run model for only north and only south
+cell_sf_tidy_before <- cell_sf_tidy[cell_sf_tidy$beforeonset == 1 & cell_sf_tidy$plant_stat_type == "median",]
+cell_sf_tidy_after <- cell_sf_tidy[cell_sf_tidy$beforeonset == 0,]
+
+agg_scheme = FALSE
+do_elim_year = FALSE
+grid_size = 0.75
+onset_results <- data.frame() # to save which grid offsets give a significant difference in onset coef between median and percentile plant
+grid_index = 0
+
+
+for (lat_offset in seq(0, 0, by = 0.25)) { # 0 to 1.5
+    for (lon_offset in seq(0, 0, by = 0.25)) { # 0 to 1.5
+      
+      grid_index = grid_index + 1 # to keep track for plotting
+      
+      # run OLS for cells planted before vs after onset
+            
+      # for before, the number of points is very low, so 
+      formula.string <- paste("plant", paste(c("onset", "intensity", "lat", "lon", "year_index"), collapse = " + "), sep = " ~ ")
+      f <- as.formula(formula.string)
+  
+      before_model = lm(f, data=cell_sf_tidy_before) 
+      before_coefficients <- before_model$coefficients
+      before_onset_coef <- before_coefficients["onset"]
+      before_intensity_coef <- before_coefficients["intensitySC"]
+      before_lat_coef <- before_coefficients["lat"]
+      before_year_coef <- before_coefficients["year_index"]
+      
+      before_std_errors <- summary(before_model)$coefficients[,2]
+      before_onset_std_error <- before_std_errors["onset"]
+      before_intensity_std_error <- before_std_errors["intensitySC"]
+      before_lat_std_error <- before_std_errors["lat"]
+      before_year_std_error <- before_std_errors["year_index"]
+  
+      after_output <- run_OLS(full_data = cell_sf_tidy_after,
+                              predictors = c("onset", "intensity",
+                                "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                ), 
+                          y.var = "plant", plant_stat = "median",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+
+      # get onset coefficients and see if statistically different
+      output <- data.frame(onset_coef = c(before_onset_coef, after_output$onset_coef),
+                           onset_stderr = c(before_onset_std_error, after_output$onset_std_error),
+                           intensity_coef = c(before_intensity_coef, after_output$intensity_coef),
+                           intensity_stderr = c(before_intensity_std_error, 
+                                            after_output$intensity_std_error),
+                           lat_coef = c(before_lat_coef, after_output$lat_coef),
+                           lat_stderr = c(before_lat_std_error, 
+                                            after_output$lat_std_error),
+                           year_coef = c(before_year_coef, after_output$year_coef),
+                           year_stderr = c(before_year_std_error, 
+                                            after_output$year_std_error),
+                           plant_stat_type = c("before", "after"),
+                           grid = c(grid_index, grid_index))
+      onset_results <- rbind(onset_results, output)
+      
+  }
+}
+
+names(onset_results) <- c('onset_coef', 'onset_stderr', 'intensity_coef', 'intensity_stderr',
+                          'lat_coef', 'lat_stderr', 'year_coef', 'year_stderr',
+                          'plant_stat_type', 'grid_index')
+
+ggplot(onset_results, aes(x = grid_index, y = onset_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = onset_coef - onset_stderr, ymax = onset_coef + onset_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = intensity_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = intensity_coef - intensity_stderr, ymax = intensity_coef + intensity_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = lat_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = lat_coef - lat_stderr, ymax = lat_coef + lat_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+ggplot(onset_results, aes(x = grid_index, y = year_coef, col = plant_stat_type)) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_errorbar(aes(ymin = year_coef - year_stderr, ymax = year_coef + year_stderr)) +
+  ggtitle(onset_type) +
+  theme_bw()
+
+```
+
+## evaluate different sampling strategies and predictors
+
+```{r}
+
+# test different grid sizes and aggregation strategies. don't do any offset
+
+do_elim_year = TRUE # TOGGLE TRUE IF USE YEAR AS TREND, FALSE IF USE YEAR AS FIXED EFFECT
+
+results <- data.frame()
+
+for (grid_size in c(0.75)) { # 0.25 to 1.75, seq(0.75, 1.25, 0.25)
+  for (agg_scheme in c(FALSE)) {
+    for (lat_offset in seq(0, 1.5, by = 0.75)) { # 0 to 1.5
+      for (lon_offset in seq(0, 1.5, by = 0.75)) { # 0 to 1.5
+        
+        model_output <- run_OLS(full_data = cell_sf_tidy, 
+                              predictors = c("onset", "intensity",
+                                "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                "year_index" # for time effects
+                                #"onset:intensity" # interactions: for intensity effects
+                                ), 
+                          y.var = "plant", plant_stat = "median",
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = agg_scheme, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+        
+        #if (agg_scheme) {agg_scheme_str <- "Agg"}
+        #else {agg_scheme_str <- "NotAgg"}
+        
+        print(paste("grid size", grid_size))
+        print(paste("agg scheme", agg_scheme))
+    
+        selected_output <- as.numeric(c(grid_size, agg_scheme, lat_offset, lon_offset,
+                             model_output$onset_coef, model_output$intensity_coef, #model_output$lat_coef,
+                             model_output$R2, model_output$percent_data_used, 
+                             model_output$residual_moran_pval, model_output$onset_moran_pval, 
+                             model_output$plant_moran_pval,
+                             #mean(model_output$prediction_results_elimyear$RMSE, na.rm = TRUE), 
+                             mean(model_output$prediction_results_elimlocation$RMSE, na.rm = TRUE)
+                             ))
+        
+        if (do_elim_year) {
+          selected_output <- c(selected_output, mean(model_output$prediction_results_elimyear$RMSE, na.rm = TRUE))
+        }
+        
+        print(selected_output)
+        results <- rbind(results, selected_output)
+      }
+    }
+  }
+}
+
+if (do_elim_year) {
+  names(results) <- c("grid_size", "agg_scheme", "lat_offset", "lon_offset",
+                    "onset_coef", "intensity_coef", #"lat_coef",
+                    "R2", "percent_used", "residual_moran_pval", "onset_moran_pval",
+                    "plant_moran_pval",
+                    "mean_RMSE_elimlocation", "mean_RMSE_elimyear")
+}
+if (!do_elim_year) {
+  names(results) <- c("grid_size", "agg_scheme", "lat_offset", "lon_offset",
+                    "onset_coef", "intensity_coef", #"lat_coef",
+                    "R2", "percent_used", "residual_moran_pval", "onset_moran_pval",
+                    "plant_moran_pval",
+                    "mean_RMSE_elimlocation")
+}
+
+results$agg_scheme <- as.factor(results$agg_scheme)
+
+# SAVED RESULTS
+saveRDS(results, "spatial_sampling_results.rds")
+
+# calculate mean and sd for each grid size x agg scheme, for different grid offsets
+results_summary <- results %>%
+                        group_by(grid_size, agg_scheme) %>%
+                        summarize(
+                          onset_coef_mean = mean(onset_coef),
+                          onset_coef_sd = sd(onset_coef),
+                          intensity_coef_mean = mean(intensity_coef),
+                          intensity_coef_sd = sd(intensity_coef),
+                          #lat_coef_mean = mean(lat_coef),
+                          #lat_coef_sd = sd(lat_coef),
+                          R2_mean = mean(R2),
+                          R2_sd = sd(R2),
+                          percent_used_mean = mean(percent_used),
+                          percent_used_sd = sd(percent_used),
+                          residual_moran_pval_mean = mean(residual_moran_pval),
+                          residual_moran_pval_sd = sd(residual_moran_pval),
+                          onset_moran_pval_mean = mean(onset_moran_pval),
+                          onset_moran_pval_sd = sd(onset_moran_pval),
+                          plant_moran_pval_mean = mean(plant_moran_pval),
+                          plant_moran_pval_sd = sd(plant_moran_pval),
+                          #RMSE_elimyear_mean = mean(mean_RMSE_elimyear), # TURN OFF IF USE YEAR AS FACTOR
+                          #RMSE_elimyear_sd = sd(mean_RMSE_elimyear), # TURN OFF IF USE YEAR AS FACTOR
+                          RMSE_elimlocation_mean = mean(mean_RMSE_elimlocation),
+                          RMSE_elimlocation_sd = sd(mean_RMSE_elimlocation)
+                        )
+
+if (do_elim_year) {
+  elim_year_summary <- results %>%
+    group_by(grid_size, agg_scheme) %>%
+    summarize(
+      RMSE_elimyear_mean = mean(mean_RMSE_elimyear),
+      RMSE_elimyear_sd = sd(mean_RMSE_elimyear) 
+    )
+  
+  results_summary <- cbind(results_summary, elim_year_summary)
+}
+
+# compare grid sizes and aggregation schemes
+
+plot_results <- function(data, x_data, y_data, x_label, y_label, col_data) {
+  ggplot(data, aes(x = x_data, y = y_data, col = col_data)) +
+    geom_line() +
+    ggtitle(y_label) +
+    xlab(x_label) +
+    ylab(y_label)+
+    labs(col = "Aggregation scheme") +
+    theme_bw()
+}
+
+plot_results_summary <- function(data, x_data, y_data, y_sd, x_label, y_label, col_data) {
+  ggplot(data, aes(x = x_data, y = y_data, col = col_data)) +
+    geom_line() +
+    geom_errorbar(aes(ymin=y_data-y_sd, ymax=y_data+y_sd), position=position_dodge(0.05)) +
+    ggtitle(y_label) +
+    xlab(x_label) +
+    ylab(y_label)+
+    labs(col = "Aggregation scheme") +
+    theme_bw()
+}
+
+# plot results, summarizing for different grid offsets
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$onset_coef_mean,
+                     y_sd = results_summary$onset_coef_sd,
+                    x_label = "grid_size", y_label = "onset coefficient", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$intensity_coef_mean,
+                     y_sd = results_summary$intensity_coef_sd,
+                    x_label = "grid_size", y_label = "intensity coefficient", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$R2_mean,
+                     y_sd = results_summary$R2_sd,
+                    x_label = "grid_size", y_label = "R2", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$percent_used_mean,
+                     y_sd = results_summary$percent_used_sd,
+                    x_label = "grid_size", y_label = "percent used", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$residual_moran_pval_mean,
+                     y_sd = results_summary$residual_moran_pval_sd,
+                    x_label = "grid_size", y_label = "residual moran's I p value", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$onset_moran_pval_mean,
+                     y_sd = results_summary$onset_moran_pval_sd,
+                    x_label = "grid_size", y_label = "onset moran's I p value", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$plant_moran_pval_mean,
+                     y_sd = results_summary$plant_moran_pval_sd,
+                    x_label = "grid_size", y_label = "plant moran's I p value", 
+                    col_data = results_summary$agg_scheme)
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$RMSE_elimlocation_mean,
+                     y_sd = results_summary$RMSE_elimlocation_sd,
+                    x_label = "grid_size", y_label = "RMSE from eliminating location", 
+                    col_data = results_summary$agg_scheme)
+
+if (do_elim_year) {
+  plot_results_summary(data = results_summary, 
+                       x_data = results_summary$grid_size, y_data = results_summary$RMSE_elimyear_mean,
+                       y_sd = results_summary$RMSE_elimyear_sd,
+                      x_label = "grid_size", y_label = "RMSE from eliminating year", 
+                      col_data = results_summary$agg_scheme)
+}
+
+```
+
+## export
+
+```{r}
+# for app.R
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na %>%
+                              mutate(year_factor = as.factor(year))
+saveRDS(as(cell_sf_tidy, 'Spatial'), "./cell_spdf.rds")
+
+```

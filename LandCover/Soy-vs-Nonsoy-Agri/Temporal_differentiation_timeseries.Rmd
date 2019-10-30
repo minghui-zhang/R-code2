@@ -1,0 +1,160 @@
+---
+title: "Temporal_differentiation"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(reshape2)
+library(tidyr)
+library(imputeTS) # for linear interpolation, na.interpolation function
+library(stringr)
+
+#setwd("~/Documents/R-code/LandCover/Soy-vs-Nonsoy-Agri")
+agsat_raw <- read.csv("modis_table_agsat_laterYears.csv") # "modis_table_agsat_laterYears.csv" or "modis_table_agsat.csv"
+plos_raw <- read.csv("modis_table_plos_laterYears.csv") # "modis_table_plos_laterYears.csv" or "modis_table_plos.csv"
+
+year <- 2013
+```
+
+## Computation functions
+
+```{r functions}
+# turns date in millis into date
+ms_to_date = function(ms, t0="1970-01-01", timezone) {
+  sec = ms / 1000
+  as.POSIXct(sec, origin=t0, tz=timezone)
+}
+
+# take raw data and add class as factor, clean up date columns, add vegetation indeces
+clean_raw_data = function(data_raw, year) {
+  
+  # turn class into a factor
+  data_raw$class <- as.factor(data_raw$class)
+  
+  # specify that original 'year' in data is actually harvest year
+  data_raw$harvest_year <- data_raw$year
+  data <- select(data_raw, -year)
+  
+  data_year <- data[data$harvest_year == year,]
+  
+  
+  # turn DOY into month
+  # data_year$date <- ms_to_date(data_year$system.time_start, timezone="America/Los_Angeles")
+  data_year$month <- month(as.Date(data_year$DayOfYear, origin = paste0(year, '-01-01')))
+  
+  # remove data with no month 
+  data_year <- data_year[complete.cases(data_year$month),]
+  
+  # add EVI 2.5(NIR - red)/(NIR + 6red - 7.5blue + 1)
+  data_year$EVI <- 2.5*(data_year$sur_refl_b02 - data_year$sur_refl_b01)/
+                    (data_year$sur_refl_b02 + 6*data_year$sur_refl_b01 - 7.5*data_year$sur_refl_b03 + 1)
+  
+  # filter out strange EVIs
+  data_year <- filter(data_year, data_year$EVI <= 5 & data_year$EVI >= -0.5)
+  
+  # take out unnecessary columns
+  data_year <- select(data_year, -c(sur_refl_b01, sur_refl_b02, sur_refl_b03, sur_refl_b04, sur_refl_b05, sur_refl_b07, system.time_start))
+  
+  return(data_year)
+}
+
+# turn output of clean_raw_data into wide format where 
+get_wide_data = function(data, year) {
+  #wide <- spread(data, DayOfYear, EVI)
+  data$DOY_round <- round(data$DayOfYear, digits = -1)
+  # <- data %>% dcast(EVI ~ DOY_round, fun = mean)
+  data <- data %>% group_by(DOY_round, point_id, class) %>%
+                  summarize(EVI = mean(EVI)) %>%
+                  spread(DOY_round, EVI) %>%
+                  ungroup()
+                  #dcast(... ~ DOY_round, value.var = "EVI", fun = mean)
+  return(data)
+}
+
+interpolate_wide_data = function(data) {
+  interpolated <- apply(data, MARGIN = 1, FUN = na.interpolation) %>% 
+                        t %>%
+                        as.data.frame
+}
+
+# turn output of clean_raw_data into wide format where 
+get_data_per10days = function(data) {
+  #wide <- spread(data, DayOfYear, EVI)
+  data$DOY_round <- round(data$DayOfYear, digits = -1)
+  # <- data %>% dcast(EVI ~ DOY_round, fun = mean)
+  data <- data %>% group_by(DOY_round, point_id, class) %>%
+                  summarize(EVI = mean(EVI)) 
+  return(data)
+}
+```
+
+## Computations
+
+```{r computations}
+# clean the raw data (add EVI and month, get rid of unnecessary columns)
+agsat <- clean_raw_data(agsat_raw, year) #%>% select(-sur_refl_b06)
+plos <- clean_raw_data(plos_raw, year) %>% select(-old_class)
+plos_oldclass <- clean_raw_data(plos_raw, year)
+
+
+# calculate EVI by ten day intervals
+agsat_10days <- get_data_per10days(agsat)
+plos_10days <- get_data_per10days(plos)
+
+ggplot(plos, aes(x = DayOfYear, y = EVI, col = class)) +
+  geom_point(alpha = 0.01) +
+  ggtitle(paste("EVI for plos points in", year)) +
+  stat_smooth() +
+  theme_linedraw() +
+  ylim(0, 2.5)
+
+ggplot(agsat, aes(x = DayOfYear, y = EVI, col = class)) +
+  geom_point(alpha = 0.01) +
+  ggtitle(paste("EVI for agsat points in", year)) +
+  stat_smooth() +
+  theme_linedraw() +
+  ylim(0, 2.5)
+
+ggplot(plos_10days, aes(x = DOY_round, y = EVI, col = class)) +
+  geom_point(alpha = 0.01) +
+  ggtitle(paste("EVI for plos points in", year, "for 10 day intervals")) +
+  stat_smooth() +
+  theme_linedraw() +
+  ylim(0, 2.5)
+
+ggplot(agsat_10days, aes(x = DOY_round, y = EVI, col = class)) +
+  geom_point(alpha = 0.01) +
+  ggtitle(paste("EVI for agsat points in", year, "for 10 day intervals")) +
+  stat_smooth() +
+  theme_linedraw() +
+  ylim(0, 2.5)
+
+ggplot(agsat_10days, aes(x = DOY_round, y = EVI)) +
+  geom_point(alpha = 0.01) +
+  ggtitle(paste("EVI for agsat points in", year, "for 10 day intervals")) +
+  stat_smooth() +
+  theme_linedraw() +
+  ylim(0, 2.5)
+
+```
+
+## Plotting functions
+
+```{r}
+
+
+```
+
+
+## Plotting
+
+```{r}
+
+
+```
+

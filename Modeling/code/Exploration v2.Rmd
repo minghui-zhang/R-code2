@@ -1,0 +1,855 @@
+---
+title: "Exploration"
+output: html_document
+---
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+percentile5_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile5_onset_cell_v2.csv')
+percentile95_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile95_onset_cell_v2.csv')
+
+median_muni_raw <- read.csv('E:/R-code/Modeling/data/median_muni_v2.csv')
+percentile5_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile5_muni_v2.csv')
+percentile95_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile95_muni_v2.csv')
+
+median_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/median_CARpoly_v2.csv')
+percentile5_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile5_CARpoly_v2.csv')
+percentile95_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile95_CARpoly_v2.csv')
+
+```
+
+## constants
+
+```{r}
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## rename and delete the columns (for median)
+
+```{r}
+
+median_cell <- subset(median_cell_raw, select = -c(double_area_km2_median, 
+                                               double_delay_sum, double_harvest_sum, double_plant_sum,
+                                               label, latitude_sum, longitude_sum, 
+                                               onset_historicalRange_sum, onset_sum, single_area_km2_median,
+                                               single_delay_sum, single_harvest_sum, single_plant_sum,
+                                               total_planted_area_km2_median, year_sum, Muni_code_sum) )
+
+median_cell <- median_cell %>% 
+                            rename(
+                              double_area_km2 = double_area_km2_sum,
+                              double_delay = double_delay_median,
+                              double_harvest = double_harvest_median,
+                              double_plant = double_plant_median,
+                              latitude = latitude_median,
+                              longitude = longitude_median,
+                              onset_historicalRange = onset_historicalRange_median,
+                              onset = onset_median,
+                              single_area_km2 = single_area_km2_sum,
+                              single_delay = single_delay_median,
+                              single_harvest = single_harvest_median,
+                              single_plant = single_plant_median,
+                              total_planted_area_km2 = total_planted_area_km2_sum,
+                              Muni_code = Muni_code_median,
+                              year = year_median
+                            ) %>%
+                            filter(year > 0)
+
+percentile5_cell <- percentile5_cell_raw %>% filter(year > 0)
+percentile95_cell <- percentile95_cell_raw %>% filter(year > 0)
+
+median_muni <- median_muni_raw %>%
+                            rename(
+                              double_area_km2 = double_area_km2_sum,
+                              double_delay = double_delay_median,
+                              double_harvest = double_harvest_median,
+                              double_plant = double_plant_median,
+                              latitude = latitude_median,
+                              longitude = longitude_median,
+                              onset_historicalRange = onset_historicalRange_median,
+                              onset = onset_median,
+                              single_area_km2 = single_area_km2_sum,
+                              single_delay = single_delay_median,
+                              single_harvest = single_harvest_median,
+                              single_plant = single_plant_median,
+                              total_planted_area_km2 = total_planted_area_km2_sum,
+                              year = year_median
+                            ) %>%
+                            filter(year > 0)
+
+percentile5_muni <- percentile5_muni_raw %>% filter(year > 0)
+percentile95_muni <- percentile95_muni_raw %>% filter(year > 0)
+
+median_CARpoly <- median_CARpoly_raw %>%
+                            rename(
+                              double_area_km2 = double_area_km2_sum,
+                              double_delay = double_delay_median,
+                              double_harvest = double_harvest_median,
+                              double_plant = double_plant_median,
+                              latitude = latitude_median,
+                              longitude = longitude_median,
+                              onset_historicalRange = onset_historicalRange_median,
+                              onset = onset_median,
+                              single_area_km2 = single_area_km2_sum,
+                              single_delay = single_delay_median,
+                              single_harvest = single_harvest_median,
+                              single_plant = single_plant_median,
+                              total_planted_area_km2 = total_planted_area_km2_sum,
+                              year = year_median
+                            ) %>%
+                            filter(year > 0)
+
+percentile5_CARpoly <- percentile5_CARpoly_raw %>% filter(year > 0)
+percentile95_CARpoly <- percentile95_CARpoly_raw %>% filter(year > 0)
+
+```
+
+## tidy the data
+
+```{r}
+
+# MEDIAN CELL ------------------------------------------------------------------------------------------------
+median_cell_plant <- median_cell %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+median_cell_delay <- median_cell %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+
+
+# 5th PERCENTILE CELL  ------------------------------------------------------------------------------------------------
+percentile5_cell_plant <- percentile5_cell %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+percentile5_cell_delay <- percentile5_cell %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+
+# 95th PERCENTILE CELL  ------------------------------------------------------------------------------------------------
+percentile95_cell_plant <- percentile95_cell %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+percentile95_cell_delay <- percentile95_cell %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+  
+# combine together
+cell_tidy <- cbind(median_cell_plant, median_cell_delay$delay, 
+                   percentile5_cell_plant$plant, percentile5_cell_delay$delay,
+                   percentile95_cell_plant$plant, percentile95_cell_delay$delay)
+colnames(cell_tidy)[colnames(cell_tidy)=="plant"] <- "plant_median"
+colnames(cell_tidy)[colnames(cell_tidy)=="percentile5_cell_plant$plant"] <- "plant_percentile5"
+colnames(cell_tidy)[colnames(cell_tidy)=="percentile95_cell_plant$plant"] <- "plant_percentile95"
+colnames(cell_tidy)[colnames(cell_tidy)=="median_cell_delay$delay"] <- "delay_median"
+colnames(cell_tidy)[colnames(cell_tidy)=="percentile5_cell_delay$delay"] <- "delay_percentile5"
+colnames(cell_tidy)[colnames(cell_tidy)=="percentile95_cell_delay$delay"] <- "delay_percentile95"
+cell_tidy$intensity_num[cell_tidy$intensity == "DC"] <- 1
+cell_tidy$intensity_num[cell_tidy$intensity == "SC"] <- 0
+
+# MEDIAN Muni ------------------------------------------------------------------------------------------------
+median_muni_plant <- median_muni %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+median_muni_delay <- median_muni %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+
+# 5th PERCENTILE Muni  ------------------------------------------------------------------------------------------------
+percentile5_muni_plant <- percentile5_muni %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+percentile5_muni_delay <- percentile5_muni %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+
+# 95th PERCENTILE Muni  ------------------------------------------------------------------------------------------------
+percentile95_muni_plant <- percentile95_muni %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+percentile95_muni_delay <- percentile95_muni %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest)) 
+
+# combine together
+muni_tidy <- cbind(median_muni_plant, median_muni_delay$delay, 
+                   percentile5_muni_plant$plant, percentile5_muni_delay$delay,
+                   percentile95_muni_plant$plant, percentile95_muni_delay$delay)
+colnames(muni_tidy)[colnames(muni_tidy)=="plant"] <- "plant_median"
+colnames(muni_tidy)[colnames(muni_tidy)=="percentile5_muni_plant$plant"] <- "plant_percentile5"
+colnames(muni_tidy)[colnames(muni_tidy)=="percentile95_muni_plant$plant"] <- "plant_percentile95"
+colnames(muni_tidy)[colnames(muni_tidy)=="median_muni_delay$delay"] <- "delay_median"
+colnames(muni_tidy)[colnames(muni_tidy)=="percentile5_muni_delay$delay"] <- "delay_percentile5"
+colnames(muni_tidy)[colnames(muni_tidy)=="percentile95_muni_delay$delay"] <- "delay_percentile95"
+muni_tidy$intensity_num[muni_tidy$intensity == "DC"] <- 1
+muni_tidy$intensity_num[muni_tidy$intensity == "SC"] <- 0
+
+# MEDIAN CARpoly ------------------------------------------------------------------------------------------------
+median_CARpoly_plant <- median_CARpoly %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+median_CARpoly_delay <- median_CARpoly %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+
+# 5th PERCENTILE CARpoly  ------------------------------------------------------------------------------------------------
+percentile5_CARpoly_plant <- percentile5_CARpoly %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+percentile5_CARpoly_delay <- percentile5_CARpoly %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest))
+
+# 95th PERCENTILE CARpoly  ------------------------------------------------------------------------------------------------
+percentile95_CARpoly_plant <- percentile95_CARpoly %>%
+  gather("double_plant", "single_plant", key = "intensity", value = "plant") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_plant", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_plant", replacement = "SC") %>%
+  select(-c(single_delay, double_delay, single_harvest, double_harvest))
+  
+percentile95_CARpoly_delay <- percentile95_CARpoly %>% 
+  gather("double_delay", "single_delay", key = "intensity", value = "delay") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "double_delay", replacement = "DC") %>%
+  mutate_if(is.character, 
+                str_replace_all, pattern = "single_delay", replacement = "SC") %>%
+  select(-c(single_plant, double_plant, single_harvest, double_harvest)) 
+  
+# combine together
+CARpoly_tidy <- cbind(median_CARpoly_plant, median_CARpoly_delay$delay, 
+                   percentile5_CARpoly_plant$plant, percentile5_CARpoly_delay$delay,
+                   percentile95_CARpoly_plant$plant, percentile95_CARpoly_delay$delay)
+colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="plant"] <- "plant_median"
+colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="percentile5_CARpoly_plant$plant"] <- "plant_percentile5"
+colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="percentile95_CARpoly_plant$plant"] <- "plant_percentile95"
+colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="median_CARpoly_delay$delay"] <- "delay_median"
+colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="percentile5_CARpoly_delay$delay"] <- "delay_percentile5"
+colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="percentile95_CARpoly_delay$delay"] <- "delay_percentile95"
+CARpoly_tidy$intensity_num[CARpoly_tidy$intensity == "DC"] <- 1
+CARpoly_tidy$intensity_num[CARpoly_tidy$intensity == "SC"] <- 0
+
+```
+
+## categorize the numeric variables
+
+```{r}
+
+# CELL SCALE ------------------------------------------------------------------------------------------------
+
+# tidy version
+cell_onset_cutoffs = quantile(cell_tidy$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+cell_onset_cutoffs[1] = cell_onset_cutoffs[1]-1
+cell_lat_cutoffs = quantile(cell_tidy$latitude, c(0,1/3,2/3,1), na.rm = TRUE)
+cell_lat_cutoffs[1] = cell_lat_cutoffs[1]-1
+cell_delay_cutoffs = quantile(cell_tidy$delay_median, c(0,1/3,2/3,1), na.rm = TRUE)
+cell_delay_cutoffs[1] = cell_delay_cutoffs[1]-1
+
+cell_tidy <- cell_tidy %>% mutate(onset_category=cut(onset, breaks = cell_onset_cutoffs, 
+                                                     labels=c("early_onset","middle_onset","late_onset"))) %>%
+                            mutate(lat_category=cut(latitude, breaks = cell_lat_cutoffs, 
+                                                     labels=c("south","central","north"))) %>%
+                            mutate(delay_category=cut(delay_median, breaks = cell_delay_cutoffs, 
+                                                     labels=c("short_delay","middle_delay","long_delay")))
+
+# untidy version (to compare SC and DC easily)
+cell_onset_cutoffs = quantile(median_cell$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+cell_onset_cutoffs[1] = cell_onset_cutoffs[1]-1
+cell_lat_cutoffs = quantile(median_cell$latitude, c(0,1/3,2/3,1), na.rm = TRUE)
+cell_lat_cutoffs[1] = cell_lat_cutoffs[1]-1
+
+median_cell <- median_cell %>% mutate(onset_category=cut(onset, breaks = cell_onset_cutoffs, 
+                                                     labels=c("early_onset","middle_onset","late_onset"))) %>%
+                            mutate(lat_category=cut(latitude, breaks = cell_lat_cutoffs, 
+                                                     labels=c("south","central","north")))
+
+# Muni SCALE ------------------------------------------------------------------------------------------------
+muni_onset_cutoffs = quantile(muni_tidy$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+muni_onset_cutoffs[1] = muni_onset_cutoffs[1]-1
+muni_lat_cutoffs = quantile(muni_tidy$latitude, c(0,1/3,2/3,1), na.rm = TRUE)
+muni_lat_cutoffs[1] = muni_lat_cutoffs[1]-1
+muni_delay_cutoffs = quantile(muni_tidy$delay_median, c(0,1/3,2/3,1), na.rm = TRUE)
+muni_delay_cutoffs[1] = muni_delay_cutoffs[1]-1
+
+muni_tidy <- muni_tidy %>% mutate(onset_category=cut(onset, breaks = muni_onset_cutoffs, 
+                                                     labels=c("early_onset","middle_onset","late_onset"))) %>%
+                            mutate(lat_category=cut(latitude, breaks = muni_lat_cutoffs, 
+                                                     labels=c("south","central","north"))) %>%
+                            mutate(delay_category=cut(delay_median, breaks = muni_delay_cutoffs, 
+                                                     labels=c("short_delay","middle_delay","long_delay")))
+
+# untidy version (to compare SC and DC easily)
+muni_onset_cutoffs = quantile(median_muni$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+muni_onset_cutoffs[1] = muni_onset_cutoffs[1]-1
+muni_lat_cutoffs = quantile(median_muni$latitude, c(0,1/3,2/3,1), na.rm = TRUE)
+muni_lat_cutoffs[1] = muni_lat_cutoffs[1]-1
+
+median_muni <- median_muni %>% mutate(onset_category=cut(onset, breaks = muni_onset_cutoffs, 
+                                                     labels=c("early_onset","middle_onset","late_onset"))) %>%
+                            mutate(lat_category=cut(latitude, breaks = muni_lat_cutoffs, 
+                                                     labels=c("south","central","north")))
+
+# CARpoly SCALE ------------------------------------------------------------------------------------------------
+CARpoly_onset_cutoffs = quantile(CARpoly_tidy$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_onset_cutoffs[1] = CARpoly_onset_cutoffs[1]-1
+CARpoly_lat_cutoffs = quantile(CARpoly_tidy$latitude, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_lat_cutoffs[1] = CARpoly_lat_cutoffs[1]-1
+CARpoly_delay_cutoffs = quantile(CARpoly_tidy$delay_median, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_delay_cutoffs[1] = CARpoly_delay_cutoffs[1]-1
+CARpoly_area_cutoffs = quantile(CARpoly_tidy$poly_area_km2, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_area_cutoffs[1] = CARpoly_area_cutoffs[1]-1
+
+CARpoly_tidy <- CARpoly_tidy %>% mutate(onset_category=cut(onset, breaks = CARpoly_onset_cutoffs, 
+                                                     labels=c("early_onset","middle_onset","late_onset"))) %>%
+                            mutate(lat_category=cut(latitude, breaks = CARpoly_lat_cutoffs, 
+                                                     labels=c("south","central","north"))) %>%
+                            mutate(delay_category=cut(delay_median, breaks = CARpoly_delay_cutoffs, 
+                                                     labels=c("short_delay","middle_delay","long_delay"))) %>%
+                            mutate(area_category=cut(poly_area_km2, breaks = CARpoly_area_cutoffs, 
+                                                     labels=c("small_property","middle_property","large_property")))
+
+# untidy version (to compare SC and DC easily)
+CARpoly_onset_cutoffs = quantile(median_CARpoly$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_onset_cutoffs[1] = CARpoly_onset_cutoffs[1]-1
+CARpoly_lat_cutoffs = quantile(median_CARpoly$latitude, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_lat_cutoffs[1] = CARpoly_lat_cutoffs[1]-1
+CARpoly_area_cutoffs = quantile(median_CARpoly$poly_area_km2, c(0,1/3,2/3,1), na.rm = TRUE)
+CARpoly_area_cutoffs[1] = CARpoly_area_cutoffs[1]-1
+
+median_CARpoly <- median_CARpoly %>% mutate(onset_category=cut(onset, breaks = CARpoly_onset_cutoffs, 
+                                                     labels=c("early_onset","middle_onset","late_onset"))) %>%
+                            mutate(lat_category=cut(latitude, breaks = CARpoly_lat_cutoffs, 
+                                                     labels=c("south","central","north"))) %>%
+                            mutate(area_category=cut(poly_area_km2, breaks = CARpoly_area_cutoffs, 
+                                                     labels=c("small_property","middle_property","large_property")))
+```
+
+## linear regression at cell scale
+
+```{r}
+
+# does cropping intensity matter ----------------------------------------------------------------------------------
+fit_simple <- lm(delay_median ~ onset + intensity_num, data=cell_tidy)
+fit_interaction <- lm(delay_median ~ onset + intensity_num + onset*intensity_num, data=cell_tidy)
+#summary(fit_interaction)
+
+# comparing models 
+#anova(fit_simple, fit_interaction)
+
+# does onset matter ----------------------------------------------------------------------------------
+fit_simple <- lm(single_delay ~ double_delay, data=median_cell)
+fit_interaction <- lm(single_delay ~ double_delay + double_delay*onset_category, data=median_cell)
+#summary(fit_interaction)
+#anova(fit_simple, fit_interaction)
+
+# does latitude matter ----------------------------------------------------------------------------------
+fit_simple <- lm(delay_median ~ onset + latitude, data=cell_tidy)
+fit_interaction <- lm(delay_median ~ onset + latitude + onset*latitude, data=cell_tidy)
+#summary(fit_interaction)
+#anova(fit_simple, fit_interaction)
+
+# does area matter ----------------------------------------------------------------------------------
+fit_simple <- lm(delay_median ~ onset + poly_area_km2, data=CARpoly_tidy)
+fit_interaction <- lm(delay_median ~ onset + poly_area_km2 + onset*poly_area_km2, data=CARpoly_tidy)
+#summary(fit_interaction)
+#anova(fit_simple, fit_interaction)
+
+# does spread correlate with area -------------------------------------------------------------------
+CARpoly_tidy$plant_spread <- CARpoly_tidy$plant_percentile95 - CARpoly_tidy$plant_percentile5
+CARpoly_tidy_forModel <- CARpoly_tidy[CARpoly_tidy$total_planted_area_km2 >= min_soy_area, ]
+
+fit_simple <- lm(plant_spread ~ poly_area_km2, data = CARpoly_tidy_forModel)
+summary(fit_simple)
+
+# does year/time matter --------------------------------------------------------------------------
+fit_simple <- lm(delay_median ~ onset + year, data=cell_tidy)
+fit_interaction <- lm(delay_median ~ onset + year + onset*year, data=cell_tidy)
+#summary(fit_interaction)
+#anova(fit_simple, fit_interaction)
+
+```
+
+
+## panel plots at cell scale
+
+```{r}
+
+# effect of latitude, cell scale
+latitude_effect1 <- ggplot(cell_tidy, aes(x=onset, y=plant_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  facet_grid(lat_category ~ .) +
+  geom_smooth(method = "lm") +
+  ggtitle("Cell scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Plant") +
+  theme_bw()
+
+latitude_effect2 <- ggplot(cell_tidy, aes(x=onset, y=delay_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  facet_grid(lat_category ~ .) +
+  geom_smooth(method = "lm") +
+  ggtitle("Cell scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+latitude_effect3 <- ggplot(cell_tidy, aes(x=onset, y=plant_median, col = lat_category)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  ggtitle("Cell scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Plant") +
+  theme_bw()
+  
+# effect of different years
+year_effect <- ggplot(cell_tidy, aes(x=onset, y=delay_median, col = intensity)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_wrap(~ year, ncol=3) +
+  ggtitle("Cell scale, effect of year") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+# are SC and DC always the same?
+SC_vs_DC <- ggplot(median_cell, aes(x=double_delay, y=single_delay, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_grid(lat_category ~ onset_category) +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("Cell scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+SC_vs_DC_byYear <- ggplot(median_cell, aes(x=double_delay, y=single_delay, col = onset_category)) + 
+  geom_point(alpha = 0.3) + 
+  facet_wrap(~ year, ncol = 3) +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("Cell scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+SC_vs_DC_onsetGroups <- ggplot(median_cell, aes(x=double_delay, y=single_delay, col = onset_category)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("Cell scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+# does onset change the relationship?
+onset_effect <- ggplot(cell_tidy, aes(x=onset, y=delay_median, col = onset_category)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm", color = "black") +
+  ggtitle("Cell scale, effect of onset category") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+# print plots
+latitude_effect1
+latitude_effect2
+latitude_effect3
+year_effect
+SC_vs_DC
+SC_vs_DC_byYear
+SC_vs_DC_onsetGroups
+onset_effect
+
+```
+
+## panel plots at muni scale
+
+```{r}
+# effect of latitude, muni scale
+latitude_effect1 <- ggplot(muni_tidy, aes(x=onset, y=plant_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  facet_grid(lat_category ~ .) +
+  geom_smooth(method = "lm") +
+  ggtitle("muni scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Plant") +
+  theme_bw()
+
+latitude_effect2 <- ggplot(muni_tidy, aes(x=onset, y=delay_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  facet_grid(lat_category ~ .) +
+  geom_smooth(method = "lm") +
+  ggtitle("muni scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+latitude_effect3 <- ggplot(muni_tidy, aes(x=onset, y=plant_median, col = lat_category)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  ggtitle("muni scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Plant") +
+  theme_bw()
+  
+# effect of different years
+year_effect <- ggplot(muni_tidy, aes(x=onset, y=delay_median, col = intensity)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_wrap(~ year, ncol=3) +
+  ggtitle("muni scale, effect of year") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+# are SC and DC always the same?
+SC_vs_DC <- ggplot(median_muni, aes(x=double_delay, y=single_delay, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_grid(lat_category ~ onset_category) +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("muni scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+SC_vs_DC_byYear <- ggplot(median_muni, aes(x=double_delay, y=single_delay, col = onset_category)) + 
+  geom_point(alpha = 0.3) + 
+  facet_wrap(~ year, ncol = 3) +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("muni scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+SC_vs_DC_onsetGroups <- ggplot(median_muni, aes(x=double_delay, y=single_delay, col = onset_category)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("muni scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+# does onset change the relationship?
+onset_effect <- ggplot(muni_tidy, aes(x=onset, y=delay_median, col = onset_category)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm", color = "black") +
+  ggtitle("muni scale, effect of onset category") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+# print plots
+latitude_effect1
+latitude_effect2
+latitude_effect3
+year_effect
+SC_vs_DC
+SC_vs_DC_byYear
+SC_vs_DC_onsetGroups
+onset_effect
+```
+
+## panel plots at CARpoly scale
+
+```{r}
+
+# effect of latitude and size, CARpoly scale
+
+latitude_size_effect1 <- ggplot(CARpoly_tidy, aes(x=onset, y=plant_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_grid(lat_category ~ area_category) +
+  ggtitle("CARpoly scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Plant") +
+  theme_bw()
+
+latitude_size_effect2 <- ggplot(CARpoly_tidy, aes(x=onset, y=delay_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_grid(lat_category ~ area_category) +
+  ggtitle("CARpoly scale, effect of latitude") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+# spread comes from large area?
+spread_from_area <- ggplot(CARpoly_tidy[CARpoly_tidy$total_planted_area_km2 >= min_soy_area,], aes(x=poly_area_km2, y=plant_percentile95-plant_percentile5, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  ggtitle("CARpoly scale, effect of size on planting date spread, with min soy area") +
+  xlab("Property Area") +
+  ylab("95th - 5th percentile plant") +
+  xlim(c(0,1500)) +
+  theme_bw()
+
+# does property size matter?
+delay_area <- ggplot(CARpoly_tidy[CARpoly_tidy$total_planted_area_km2 >= min_soy_area, ], aes(x=poly_area_km2, y=delay_median, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  ggtitle("CARpoly scale, effect of size on delay, with min soy area") +
+  xlab("Property Area") +
+  ylab("Delay") +
+  xlim(c(0,1500)) +
+  theme_bw()
+
+# are SC and DC always the same?
+SC_vs_DC <- ggplot(median_CARpoly, aes(x=double_delay, y=single_delay, col = year)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_grid(area_category ~ lat_category) +
+  geom_abline(slope = 1, intercept = 0) +
+  ggtitle("CARpoly scale, SC vs DC") +
+  xlab("DC delay") +
+  ylab("SC delay") +
+  theme_bw()
+
+# does onset change the relationship?
+onset_effect <- ggplot(CARpoly_tidy, aes(x=onset, y=delay_median, col = intensity)) + 
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  facet_grid(onset_category ~ .) +
+  ggtitle("CARpoly scale, effect of onset category") +
+  xlab("Onset") +
+  ylab("Delay") +
+  theme_bw()
+
+# print plots
+#latitude_size_effect1
+#latitude_size_effect2
+spread_from_area
+delay_area
+#SC_vs_DC
+#onset_effect
+
+```
+
+## exploratory plots of planting date at cell scale
+
+```{r}
+
+median_plant_onset_intensity <- ggplot(cell_tidy, aes(x = onset, y = plant_median, col = intensity)) +
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("Median plant, Onset cell scale, all years") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+median_plant_onset_byYear <- ggplot(cell_tidy[cell_tidy$intensity == "DC",], aes(x = onset, y = plant_median, col = year)) + 
+  geom_point(alpha = 0.5) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("Median plant, Onset cell scale, double crop") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+percentile5_plant_onset_intensity <- ggplot(cell_tidy, aes(x = onset, y = plant_percentile5, col = intensity)) + 
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("5th percentile plant, Onset cell scale, all years") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+percentile5_plant_onset_byYear <- ggplot(cell_tidy[cell_tidy$intensity == "DC",], aes(x = onset, y = plant_percentile5, col = year)) + 
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("5th percentile plant, Onset cell scale, double crop") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+median_plant_onset_intensity
+median_plant_onset_byYear
+percentile5_plant_onset_intensity
+percentile5_plant_onset_byYear
+
+```
+
+## exploratory plots of planting date at CARpoly scale
+
+```{r}
+
+median_plant_onset_intensity <- ggplot(CARpoly_tidy, aes(x = onset, y = plant_median, col = intensity)) +
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("Median plant, CARpoly scale, all years") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+median_plant_onset_byYear <- ggplot(CARpoly_tidy[CARpoly_tidy$intensity == "DC",], aes(x = onset, y = plant_median, col = year)) + 
+  geom_point(alpha = 0.5) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("Median plant, CARpoly scale, double crop") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+percentile5_plant_onset_intensity <- ggplot(CARpoly_tidy, aes(x = onset, y = plant_percentile5, col = intensity)) + 
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("5th percentile plant, CARpoly scale, all years") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+percentile5_plant_onset_byYear <- ggplot(CARpoly_tidy[CARpoly_tidy$intensity == "DC",], aes(x = onset, y = plant_percentile5, col = year)) + 
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Plant Date") +
+  xlim(20, 150) +
+  ylim(20, 200) +
+  ggtitle("5th percentile plant, CARpoly scale, double crop") +
+  geom_abline(slope = 1, intercept = 0) +
+  theme_bw()
+
+# print plots
+median_plant_onset_intensity
+median_plant_onset_byYear
+percentile5_plant_onset_intensity
+percentile5_plant_onset_byYear
+
+```
+
+## exploratory plots of delay
+
+```{r}
+
+median_delay_onset_intensity <- ggplot(cell_tidy, aes(x = onset, y = delay_median, col = intensity)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm") +
+  xlab("Onset") +
+  ylab("Delay") +
+  ggtitle("Median delay, Onset cell scale, all years") +
+  geom_hline(yintercept = 0) +
+  theme_bw()
+
+median_delay_onset_byYear <- ggplot(cell_tidy[cell_tidy$intensity == "DC",], aes(x = onset, y = delay_median, col = year)) + 
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  xlab("Onset") +
+  ylab("Delay") +
+  ggtitle("Median delay, Onset cell scale, double crop") +
+  geom_hline(yintercept = 0) +
+  theme_bw()
+
+percentile5_delay_onset_intensity <- ggplot(cell_tidy, aes(x = onset, y = delay_percentile5, col = intensity)) +
+  geom_point(alpha = 0.3) +
+  xlab("Onset") +
+  ylab("Delay") +
+  ggtitle("5th percentile delay, Onset cell scale, all years") +
+  geom_hline(yintercept = 0) +
+  theme_bw()
+
+percentile5_delay_onset_byYear <- ggplot(cell_tidy[cell_tidy$intensity == "DC",], aes(x = onset, y = delay_percentile5, col = year)) + 
+  geom_point(alpha = 0.5) +
+  xlab("Onset") +
+  ylab("Delay") +
+  ggtitle("5th percentile delay, Onset cell scale, double crop") +
+  geom_hline(yintercept = 0) +
+  theme_bw()
+
+# print plots
+median_delay_onset_intensity
+median_delay_onset_byYear
+percentile5_delay_onset_intensity
+percentile5_delay_onset_byYear
+```

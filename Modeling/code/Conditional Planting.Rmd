@@ -1,0 +1,202 @@
+---
+title: "Describe planting as distribution conditional on onset"
+output: html_document
+---
+
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(plyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics) # for rmse
+library(leaflet)
+library(leaps) # stepwise model selection
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+source('E:/R-code/Modeling/code/FCN_plotting.R')
+source('E:/R-code/Modeling/code/FCN_sample_data.R')
+source('E:/R-code/Modeling/code/FCN_run_model_spatial_sampled.R')
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+onset_type <- 'Gabriel_onset'
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+percentile5_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile5_onset_cell_v2.csv')
+percentile95_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile95_onset_cell_v2.csv')
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+
+
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile95_cell <- percentile95_cell_raw %>% rename_cols_percentile_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+
+cell_sf_percentile95 <- cell_sf
+cell_sf_percentile95$SC_plant <- percentile95_cell$SC_plant
+cell_sf_percentile95$DC_plant <- percentile95_cell$DC_plant
+cell_sf_percentile95$plant_stat_type <- rep("percentile95", nrow(cell_sf_percentile95))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile95)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+
+```
+
+## create pdfs of plant, conditional on onset and intensity
+
+```{r}
+
+plant_stat_type_oi <- "median"
+get_onset_conditioned_histogram <- function(data, onset_category, plant_stat_type) {
+  
+  
+  return(ggplot(data = data) +
+    geom_histogram(aes(x = plant, fill = intensity)) +
+    #geom_density(aes(x = plant, color = intensity)) +
+    #geom_vline(data = ddply(cell_df_tidy, "hard_onset_category", summarize, low_onset = min(strtoi(hard_onset_category))), 
+    #           aes(xintercept=low_onset)) +
+    labs(title=paste(plant_stat_type, "plant, conditioned on onset"),
+          x ="Planting Date", y = "Count") +
+    #geom_vline(xintercept = 50) +
+    facet_wrap(facets = onset_category) +
+    xlim(20, 150) +
+    theme_bw())
+}
+
+get_onset_conditioned_pdf <- function(data, onset_category, plant_stat_type) {
+  
+  
+  return(ggplot(data = data) +
+    #geom_histogram(aes(x = plant, color = intensity)) +
+    geom_density(aes(x = plant, color = intensity)) +
+    #geom_vline(data = ddply(cell_df_tidy, "hard_onset_category", summarize, low_onset = min(strtoi(hard_onset_category))), 
+    #           aes(xintercept=low_onset)) +
+    #geom_vline(xintercept = 50) +
+    labs(title=paste(plant_stat_type, "plant, conditioned on onset"),
+          x ="Planting Date", y = "Count") +
+    facet_wrap(facets =  onset_category) +
+    xlim(20, 150) +
+    ylim(0, 0.06) +
+    theme_bw())
+}
+
+get_onset_conditioned_cdf <- function(data, onset_category, plant_stat_type) {
+  
+  
+  return(ggplot(data = data) +
+    #geom_histogram(aes(x = plant, color = intensity)) +
+    stat_ecdf(aes(x = plant, color = intensity)) +
+    #geom_vline(data = ddply(cell_df_tidy, "hard_onset_category", summarize, low_onset = min(strtoi(hard_onset_category))), 
+    #           aes(xintercept=low_onset)) +
+    #geom_vline(xintercept = 50) +
+    labs(title=paste(plant_stat_type, "plant, conditioned on onset"),
+          x ="Planting Date", y = "Count") +
+    facet_wrap(facets =  onset_category) +
+    xlim(0, 200) +
+    ylim(0, 1) +
+    theme_bw())
+}
+
+
+# turn into dataframe
+cell_df_tidy <- cell_sf_tidy
+st_geometry(cell_df_tidy) <- NULL
+# filter for plant_stat_type
+cell_df_tidy <- cell_df_tidy[cell_df_tidy$plant_stat_type == plant_stat_type_oi,]
+
+quantile_onset_cutoffs = quantile(cell_df_tidy$onset, seq(0, 1, by = 0.1), na.rm = TRUE)
+hard_onset_cutoffs = seq(20, 100, by = 10)
+cell_df_tidy <- cell_df_tidy %>% mutate(quantile_onset_category=cut(onset, breaks = quantile_onset_cutoffs,
+                                        labels = quantile_onset_cutoffs[1:10])) %>% # label as the start of the period
+                                mutate(hard_onset_category = cut(onset, breaks = hard_onset_cutoffs, 
+                                                                 labels = seq(20, 90, by = 10))) # label as the start of the period
+
+
+unconditioned_pdf <- ggplot(data = cell_df_tidy) +
+  #geom_histogram(aes(x = plant)) +
+  geom_density(aes(x = plant, color = intensity)) +
+  labs(title=paste(plant_stat_type_oi, "plant, unconditioned on onset"),
+        x ="Planting Date", y = "Count") +
+  xlim(0, 200) +
+  theme_bw()
+
+unconditioned_cdf <- ggplot(data = cell_df_tidy) +
+  #geom_histogram(aes(x = plant)) +
+  stat_ecdf(aes(x = plant, color = intensity)) +
+  labs(title=paste(plant_stat_type_oi, "plant, unconditioned on onset"),
+        x ="Planting Date", y = "Count") +
+  xlim(0, 200) +
+  theme_bw()
+
+print(get_onset_conditioned_histogram(cell_df_tidy, cell_df_tidy$quantile_onset_category, plant_stat_type_oi))
+print(get_onset_conditioned_pdf(cell_df_tidy, cell_df_tidy$quantile_onset_category, plant_stat_type_oi))
+print(get_onset_conditioned_cdf(cell_df_tidy, cell_df_tidy$quantile_onset_category, plant_stat_type_oi))
+print(get_onset_conditioned_histogram(cell_df_tidy, cell_df_tidy$hard_onset_category, plant_stat_type_oi))
+print(get_onset_conditioned_pdf(cell_df_tidy, cell_df_tidy$hard_onset_category, plant_stat_type_oi))
+print(get_onset_conditioned_cdf(cell_df_tidy, cell_df_tidy$hard_onset_category, plant_stat_type_oi))
+print(unconditioned_pdf)
+print(unconditioned_cdf)
+#print(onset_conditioned_histogram)
+```

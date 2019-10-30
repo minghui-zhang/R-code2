@@ -1,0 +1,228 @@
+---
+title: "Exploration"
+output: html_document
+---
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(sp)
+library(rgdal)
+library(rgeos)
+library(tmap)
+library(spdep)
+library(pgirmess) # spatial correlelogram
+
+cell_shp <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+
+```
+
+## clean and visualize
+
+```{r}
+
+# visualize for select years
+
+plot_cell_quantiles <- function(year, var.name) {
+  cell_year <- cell_shp[cell_shp$year == year, ]
+  tm_shape(cell_year) + tm_fill(var.name, palette = "Reds", style = "quantile", 
+    title = paste("Quantiles of", var.name, year)) + tm_borders(alpha=.4)
+}
+
+plot_cell_data <- function(year, var.name) {
+  cell_year <- cell_shp[cell_shp$year == year, ]
+  tm_shape(cell_year) + tm_fill(var.name, palette = "viridis", breaks = seq(from = 0, to = 200, by = 20),
+    title = paste("DOY of", var.name, year)) + tm_borders(alpha=.4)
+}
+
+for (year in 2004:2014) {
+  print(plot_cell_quantiles(year, "onset"))
+  print(plot_cell_data(year, "onset"))
+  
+  print(plot_cell_quantiles(year, "DC_plant"))
+  print(plot_cell_data(year, "DC_plant"))
+    
+  print(plot_cell_quantiles(year, "DC_delay"))
+  print(plot_cell_data(year, "DC_delay"))
+}
+
+
+
+```
+
+## spatial autocorrelation 
+
+```{r}
+
+plot_cell_local_moran <- function(year, var.name) {
+  
+  # source: http://www.spatialanalysisonline.com/An%20Introduction%20to%20Spatial%20Data%20Analysis%20in%20R.pdf
+  
+  cell_year <- cell_shp[cell_shp$year == year, ]
+
+  # eliminate no data cells
+  cell_year <- cell_year[!is.na(cell_year[[var.name]]),]
+  
+  neighbors <- poly2nb(cell_year)
+    
+  # Convert the neighbour data to a listw object
+  listw <- nb2listw(neighbors, zero.policy = TRUE)
+  
+  local <- localmoran(x = cell_year[[var.name]], listw = nb2listw(neighbors, style = "W", zero.policy = TRUE))
+  
+  # binds results to our polygon shapefile
+  moran.map <- cbind(cell_year, local)
+  # maps the results
+  output <- tm_shape(moran.map) + tm_fill(col = "Ii", style = "quantile", title = paste("local moran", var.name, year))
+  
+  return(output)
+}
+
+
+plot_cell_lisa_cluster <- function(year, var.name) {
+  
+  # source: http://www.spatialanalysisonline.com/An%20Introduction%20to%20Spatial%20Data%20Analysis%20in%20R.pdf
+  
+  cell_year <- cell_shp[cell_shp$year == year, ]
+
+  # eliminate no data cells
+  cell_year <- cell_year[!is.na(cell_year[[var.name]]),]
+  
+  neighbors <- poly2nb(cell_year)
+    
+  # Convert the neighbour data to a listw object
+  listw <- nb2listw(neighbors, zero.policy = TRUE)
+  
+  local <- localmoran(x = cell_year[[var.name]], listw = nb2listw(neighbors, style = "W", zero.policy = TRUE))
+  
+  # create LISA cluster map
+  quadrant <- vector(mode="numeric",length=nrow(local))
+  
+  # centers the variable of interest around its mean
+  m.plant <- cell_year[[var.name]] - mean(cell_year[[var.name]])
+  
+  # centers the local Moran's around the mean
+  m.local <- local[,1] - mean(local[,1], na.rm = TRUE)
+  
+  # significance threshold
+  signif <- 0.1
+  
+  # builds a data quadrant
+  quadrant[m.plant >0 & m.local>0] <- 4
+  quadrant[m.plant <0 & m.local<0] <- 1
+  quadrant[m.plant <0 & m.local>0] <- 2
+  quadrant[m.plant >0 & m.local<0] <- 3
+  quadrant[local[,5]>signif] <- 0
+  
+  # plot in r
+  brks <- c(0,1,2,3,4)
+  colors <- c("white","blue",rgb(0,0,1,alpha=0.4),rgb(1,0,0,alpha=0.4),"red")
+  plot(cell_year,border="lightgray",col=colors[findInterval(quadrant,brks,all.inside=FALSE)], main = paste("LISA cluster", var.name, year))
+  box()
+  legend("bottomleft",legend=c("insignificant","low-low","low-high","high-low","high-high"),
+  fill=colors,bty="n")
+
+}
+
+plot_cell_correlelogram <- function(year, var.name) {
+ 
+  # source: http://www.petrkeil.com/?p=1050
+  
+  cell_year <- cell_shp[cell_shp$year == year, ]
+
+  # eliminate no data cells
+  cell_year <- cell_year[!is.na(cell_year[[var.name]]),]
+
+  # using pgirmess package
+  # first project from degrees to WGS 84 so distance units are more interpretable... but not used
+  #cell_2010_km = spTransform(cell_2010, CRS('+init=epsg:5880'))
+  
+  latlon = data.frame(x = cell_year@data$lon, y = cell_year@data$lat)
+  z_value = cell_year@data[[var.name]]
+  pgi.cor <- correlog(coords=latlon, z=z_value, method="Moran", nbclass=21)
+  plot(pgi.cor[,'dist.class'], pgi.cor[,'coef'], ylab = "Moran's I", xlab = "distance unit (degrees)", main = paste("spatial correlation", var.name, year))
+  abline(h = 0)
+  
+}
+
+for (year in 2004:2014) {
+  
+  #print(plot_cell_local_moran(year, "onset"))
+  #print(plot_cell_lisa_cluster(year, "onset"))
+  #print(plot_cell_correlelogram(year, "onset"))
+  
+  #print(plot_cell_local_moran(year, "DC_plant"))
+  #print(plot_cell_lisa_cluster(year, "DC_plant"))
+  #print(plot_cell_correlelogram(year, "DC_plant"))
+  
+  #print(plot_cell_local_moran(year, "DC_delay"))
+  #print(plot_cell_lisa_cluster(year, "DC_delay"))
+  #print(plot_cell_correlelogram(year, "DC_delay"))
+}
+
+
+```
+
+## test
+
+```{r}
+
+cell_year <- cell_shp[cell_shp$year == 2004, ]
+
+  # eliminate no data cells
+  cell_year <- cell_year[!is.na(cell_year[["DC_plant"]]),]
+  
+ x = cell_year@data$lon
+ y = cell_year@data$lat
+  z = cell_year@data[["DC_plant"]]
+  
+# lisa analysis
+fit1 <- lisa(x = x, y = y, z = z, neigh = 3, resamp = 500)
+# }
+# NOT RUN {
+plot(fit1, neigh.mean=FALSE)
+# }
+```
+## unused functions
+
+```{r}
+
+# unsure of this one
+plot_cell_getis_ortid <- function(year, var.name) {
+  cell_year <- cell_shp[cell_shp$year == year, ]
+
+  # eliminate no data cells
+  cell_year <- cell_year[!is.na(cell_year[[var.name]]),]
+  
+  # creates centroid and joins neighbours within 0 and x units
+  nb <- dnearneigh(coordinates(cell_year),0,100000) # 25km is individual cell
+  
+  # creates listw
+  nb_lw <- nb2listw(nb, style = 'B')
+  
+  # compute Getis-Ord Gi statistic
+  local_g <- localG(cell_year[[var.name]], nb_lw)
+  local_g <- cbind(cell_year, as.matrix(local_g))
+  names(local_g)[6] <- "gstat"
+  
+  # map the results
+  tm_shape(local_g) + tm_fill("gstat", palette = "RdBu", style = "pretty") +
+  tm_borders(alpha=.4)
+}
+
+# global spatial autocorrelation
+moran.test(cell_2010$DC_plant, listw, zero.policy = TRUE, na.action = na.exclude)
+
+# spatial correlelogram ---------------------------------------------------------------------------------------------------------------
+# source: http://www.petrkeil.com/?p=1050
+
+# using spsep package; this method takes too long
+#sp.cor <- sp.correlogram(nb, cell_2010$DC_plant, order=15, method="I", randomisation=FALSE)
+
+```
+

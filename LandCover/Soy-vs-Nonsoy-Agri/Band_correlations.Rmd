@@ -1,0 +1,97 @@
+---
+title: "Band_correlations"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(reshape2)
+library(tidyr)
+library(imputeTS) # for linear interpolation, na.interpolation function
+library(stringr)
+
+#setwd("~/Documents/R-code/LandCover/Soy-vs-Nonsoy-Agri")
+agsat_raw <- read.csv("modis_table_agsat.csv") # "modis_table_agsat_laterYears.csv" or "modis_table_agsat.csv"
+plos_raw <- read.csv("modis_table_plos.csv") # "modis_table_plos_laterYears.csv" or "modis_table_plos.csv"
+
+year <- 2009
+```
+
+## Computation functions
+
+```{r functions}
+# turns date in millis into date
+ms_to_date = function(ms, t0="1970-01-01", timezone) {
+  sec = ms / 1000
+  as.POSIXct(sec, origin=t0, tz=timezone)
+}
+
+# take raw data and add class as factor, clean up date columns, add vegetation indeces
+clean_raw_data = function(data_raw, year) {
+  
+  # turn class into a factor
+  data_raw$class <- as.factor(data_raw$class)
+  
+  # specify that original 'year' in data is actually harvest year
+  data_raw$harvest_year <- data_raw$year
+  data <- select(data_raw, -year)
+  
+  data_year <- data[data$harvest_year == year,]
+  
+  
+  # turn DOY into month
+  # data_year$date <- ms_to_date(data_year$system.time_start, timezone="America/Los_Angeles")
+  data_year$month <- month(as.Date(data_year$DayOfYear, origin = paste0(year, '-01-01')))
+  
+  # remove data with no month 
+  data_year <- data_year[complete.cases(data_year$month),]
+  
+  # add EVI 2.5(NIR - red)/(NIR + 6red - 7.5blue + 1)
+  data_year$EVI <- 2.5*(data_year$sur_refl_b02 - data_year$sur_refl_b01)/
+                    (data_year$sur_refl_b02 + 6*data_year$sur_refl_b01 - 7.5*data_year$sur_refl_b03 + 1)
+  
+  # filter out strange EVIs
+  data_year <- filter(data_year, data_year$EVI <= 5 & data_year$EVI >= -0.5)
+  
+  # take out unnecessary columns
+  data_year <- select(data_year, -c(system.time_start, DayOfYear, class, lat, lon, point_id, month, harvest_year))
+  
+  return(data_year)
+}
+
+```
+
+## Computations
+
+```{r computations}
+# clean the raw data (add EVI and month, get rid of unnecessary columns)
+agsat <- clean_raw_data(agsat_raw, year) %>% select(-sur_refl_b06)
+plos <- clean_raw_data(plos_raw, year) %>% select(-old_class)
+
+# compute covariance
+print("agsat correlation")
+cor(agsat, use = "complete.obs")
+print("plos correlation")
+cor(plos, use = "complete.obs")
+
+```
+
+## Plotting
+
+```{r}
+panel.cor <- function(x, y, ...)
+{
+par(usr = c(0, 1, 0, 1))
+txt <- as.character(format(cor(x, y), digits=2))
+text(0.5, 0.5, txt, cex = 2* abs(cor(x, y)))
+}
+
+
+pairs(agsat, labels = names(agsat), main = "agsat matrix", upper.panel=panel.cor)
+pairs(plos, labels = names(plos), main = "plos matrix", upper.panel=panel.cor)
+```
+

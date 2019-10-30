@@ -1,0 +1,323 @@
+---
+title: "Temporal_differentiation"
+output: html_document
+---
+
+## Setup
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(reshape2)
+library(tidyr)
+library(imputeTS) # for linear interpolation, na.interpolation function
+library(stringr)
+
+#setwd("~/Documents/R-code/LandCover/Soy-vs-Nonsoy-Agri")
+agsat_raw <- read.csv("modis_table_agsat.csv") # "modis_table_agsat_laterYears.csv" or "modis_table_agsat.csv"
+plos_raw <- read.csv("modis_table_plos.csv") # "modis_table_plos_laterYears.csv" or "modis_table_plos.csv"
+
+year <- 2009
+```
+
+## Computation functions
+
+```{r functions}
+# turns date in millis into date
+ms_to_date = function(ms, t0="1970-01-01", timezone) {
+  sec = ms / 1000
+  as.POSIXct(sec, origin=t0, tz=timezone)
+}
+
+# take raw data and add class as factor, clean up date columns, add vegetation indeces
+clean_raw_data = function(data_raw, year) {
+  
+  # turn class into a factor
+  data_raw$class <- as.factor(data_raw$class)
+  
+  # specify that original 'year' in data is actually harvest year
+  data_raw$harvest_year <- data_raw$year
+  data <- select(data_raw, -year)
+  
+  data_year <- data[data$harvest_year == year,]
+  
+  
+  # turn DOY into month
+  # data_year$date <- ms_to_date(data_year$system.time_start, timezone="America/Los_Angeles")
+  data_year$month <- month(as.Date(data_year$DayOfYear, origin = paste0(year, '-01-01')))
+  
+  # remove data with no month 
+  data_year <- data_year[complete.cases(data_year$month),]
+  
+  # add EVI 2.5(NIR - red)/(NIR + 6red - 7.5blue + 1)
+  data_year$EVI <- 2.5*(data_year$sur_refl_b02 - data_year$sur_refl_b01)/
+                    (data_year$sur_refl_b02 + 6*data_year$sur_refl_b01 - 7.5*data_year$sur_refl_b03 + 1)
+  
+  # take out unnecessary columns
+  data_year <- select(data_year, -c(sur_refl_b01, sur_refl_b02, sur_refl_b03, sur_refl_b04, sur_refl_b05, sur_refl_b07, system.time_start))
+  
+  return(data_year)
+}
+
+# turn output of clean_raw_data into wide format where 
+get_wide_data = function(data, year) {
+  #wide <- spread(data, DayOfYear, EVI)
+  data$DOY_round <- round(data$DayOfYear, digits = -1)
+  # <- data %>% dcast(EVI ~ DOY_round, fun = mean)
+  data <- data %>% group_by(DOY_round, point_id, class) %>%
+                  summarize(EVI = mean(EVI)) %>%
+                  spread(DOY_round, EVI) %>%
+                  ungroup()
+                  #dcast(... ~ DOY_round, value.var = "EVI", fun = mean)
+  return(data)
+}
+
+interpolate_wide_data = function(data) {
+  interpolated <- apply(data, MARGIN = 1, FUN = na.interpolation) %>% 
+                        t %>%
+                        as.data.frame
+}
+```
+
+## Computations
+
+```{r computations}
+# clean the raw data (add EVI and month, get rid of unnecessary columns)
+agsat <- clean_raw_data(agsat_raw, year) #%>% select(-sur_refl_b06)
+plos <- clean_raw_data(plos_raw, year) %>% select(-old_class)
+plos_oldclass <- clean_raw_data(plos_raw, year)
+
+# look at how many data points there are in each class
+print("agsat")
+print(summary(agsat$class))
+print("plos")
+print(summary(plos$class))
+
+# create wide format data for all classes lumped and for each class separately
+agsat_wide <- get_wide_data(agsat, year) %>% select(-c(point_id, class)) # only get the EVI timeseries information
+agsat_wide_class0 <- agsat %>% filter(class == 0) %>% get_wide_data(year) %>% select(-c(point_id, class))
+agsat_wide_class1 <- agsat %>% filter(class == 1) %>% get_wide_data(year) %>% select(-c(point_id, class))
+agsat_wide_class2 <- agsat %>% filter(class == 2) %>% get_wide_data(year) %>% select(-c(point_id, class))
+
+plos_wide <- get_wide_data(plos, year) %>% select(-c(point_id, class)) # only get the EVI timeseries information
+plos_wide_class0 <- plos %>% filter(class == 0) %>% get_wide_data(year) %>% select(-c(point_id, class))
+plos_wide_class1 <- plos %>% filter(class == 1) %>% get_wide_data(year) %>% select(-c(point_id, class))
+plos_wide_class2 <- plos %>% filter(class == 2) %>% get_wide_data(year) %>% select(-c(point_id, class))
+
+plos_oldclass_wide_class1 <- plos_oldclass %>% filter(old_class == 1) %>% 
+                                      get_wide_data(year) %>% select(-c(point_id, class)) 
+plos_oldclass_wide_class2 <- plos_oldclass %>% filter(old_class == 2) %>% 
+                                      get_wide_data(year) %>% select(-c(point_id, class)) 
+plos_oldclass_wide_class3 <- plos_oldclass %>% filter(old_class == 3) %>% 
+                                      get_wide_data(year) %>% select(-c(point_id, class)) 
+plos_oldclass_wide_class4 <- plos_oldclass %>% filter(old_class == 4) %>% 
+                                      get_wide_data(year) %>% select(-c(point_id, class)) 
+plos_oldclass_wide_class9 <- plos_oldclass %>% filter(old_class == 9) %>% 
+                                      get_wide_data(year) %>% select(-c(point_id, class)) 
+
+# interpolate across rows of data
+agsat_interpolated <- interpolate_wide_data(agsat_wide)
+agsat_interpolated_class0 <- interpolate_wide_data(agsat_wide_class0)
+agsat_interpolated_class1 <- interpolate_wide_data(agsat_wide_class1)
+agsat_interpolated_class2 <- interpolate_wide_data(agsat_wide_class2)
+
+plos_interpolated <- interpolate_wide_data(plos_wide)
+plos_interpolated_class0 <- interpolate_wide_data(plos_wide_class0)
+plos_interpolated_class1 <- interpolate_wide_data(plos_wide_class1)
+plos_interpolated_class2 <- interpolate_wide_data(plos_wide_class2)
+
+plos_oldclass_interpolated_class1 <- interpolate_wide_data(plos_oldclass_wide_class1)
+plos_oldclass_interpolated_class2 <- interpolate_wide_data(plos_oldclass_wide_class2)
+plos_oldclass_interpolated_class3 <- interpolate_wide_data(plos_oldclass_wide_class3)
+plos_oldclass_interpolated_class4 <- interpolate_wide_data(plos_oldclass_wide_class4)
+plos_oldclass_interpolated_class9 <- interpolate_wide_data(plos_oldclass_wide_class9)
+
+# do PCA on scaled and interpolated data
+pca_agsat <- svd(scale(agsat_interpolated))
+pca_agsat_class0 <- svd(scale(agsat_interpolated_class0))
+pca_agsat_class1 <- svd(scale(agsat_interpolated_class1))
+pca_agsat_class2 <- svd(scale(agsat_interpolated_class2))
+
+pca_plos <- svd(scale(plos_interpolated))
+pca_plos_class0 <- svd(scale(plos_interpolated_class0))
+pca_plos_class1 <- svd(scale(plos_interpolated_class1))
+pca_plos_class2 <- svd(scale(plos_interpolated_class2))
+pca_plos_oldclass_class1 <- svd(scale(plos_oldclass_interpolated_class1))
+pca_plos_oldclass_class2 <- svd(scale(plos_oldclass_interpolated_class2))
+pca_plos_oldclass_class3 <- svd(scale(plos_oldclass_interpolated_class3))
+pca_plos_oldclass_class4 <- svd(scale(plos_oldclass_interpolated_class4))
+pca_plos_oldclass_class9 <- svd(scale(plos_oldclass_interpolated_class9))
+
+```
+
+## Plotting functions
+
+```{r}
+make_screeplot <- function(pca_result, data_name) {
+  
+  screeplot <- plot((pca_result$d^2 / sum(pca_result$d^2))[1:20], type = 'b',
+    log = 'y', main = paste('Screeplot: PCA on EVI Timeseries for', data_name),
+    ylab = 'Proportion of Variance Explained', xlab = 'No. of Principal Components')
+  
+  return(screeplot)
+}
+
+make_loadings_plot <- function(pca_result, data_name) {
+  pca_components <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result$v[1:37,1],
+    PC2 = pca_result$v[1:37,2],
+    PC3 = pca_result$v[1:37,3],
+    PC4 = pca_result$v[1:37,4])
+ 
+  loadings_plot <- pca_components %>%
+    gather(key = 'PCs', value = 'loading', -DOY) %>%
+    ggplot(mapping = aes(x = DOY, y = loading)) +
+    geom_line(size = 1) +
+    facet_wrap(~ PCs) +
+    labs(title = paste('Loadings on Principal Components for', data_name),
+      x = 'DOY since Jan 1') +
+    theme_linedraw() 
+  
+  return(loadings_plot)
+}
+
+make_loadings_plot_byClass <- function(pca_result_class0, pca_result_class1, pca_result_class2, data_name) {
+  pca_components_class0 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class0$v[1:37,1],
+    PC2 = pca_result_class0$v[1:37,2],
+    PC3 = pca_result_class0$v[1:37,3],
+    PC4 = pca_result_class0$v[1:37,4], 
+    class = as.factor(rep(0, length(seq.int(0, 360, 10))))
+  )
+ 
+  pca_components_class1 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class1$v[1:37,1],
+    PC2 = pca_result_class1$v[1:37,2],
+    PC3 = pca_result_class1$v[1:37,3],
+    PC4 = pca_result_class1$v[1:37,4], 
+    class = as.factor(rep(1, length(seq.int(0, 360, 10))))
+  )
+  
+  pca_components_class2 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class2$v[1:37,1],
+    PC2 = pca_result_class2$v[1:37,2],
+    PC3 = pca_result_class2$v[1:37,3],
+    PC4 = pca_result_class2$v[1:37,4], 
+    class = as.factor(rep(2, length(seq.int(0, 360, 10))))
+  )
+  
+  pca_components <- rbind(pca_components_class0, pca_components_class1, pca_components_class2)
+  
+
+  
+  loadings_plot <- pca_components %>%
+    gather(key = 'PCs', value = 'loading', -c(DOY, class)) %>%
+    ggplot(aes(x = DOY, y = loading, color = class)) +
+    geom_line(size = 1) +
+    facet_wrap(~ PCs) +
+    labs(title = paste('Loadings on Principal Components for', data_name),
+      x = 'DOY since Jan 1') +
+    theme_linedraw() 
+  
+  return(loadings_plot)
+}
+
+# this is for plos only
+make_loadings_plot_byOldClass <- function(pca_result_class1, pca_result_class2, pca_result_class3, 
+                                            pca_result_class4, pca_result_class9, data_name) {
+  
+  pca_components_class1 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class1$v[1:37,1],
+    PC2 = pca_result_class1$v[1:37,2],
+    PC3 = pca_result_class1$v[1:37,3],
+    PC4 = pca_result_class1$v[1:37,4], 
+    class = as.factor(rep(1, length(seq.int(0, 360, 10))))
+  )
+  
+  pca_components_class2 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class2$v[1:37,1],
+    PC2 = pca_result_class2$v[1:37,2],
+    PC3 = pca_result_class2$v[1:37,3],
+    PC4 = pca_result_class2$v[1:37,4], 
+    class = as.factor(rep(2, length(seq.int(0, 360, 10))))
+  )
+  
+  pca_components_class3 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class3$v[1:37,1],
+    PC2 = pca_result_class3$v[1:37,2],
+    PC3 = pca_result_class3$v[1:37,3],
+    PC4 = pca_result_class3$v[1:37,4], 
+    class = as.factor(rep(3, length(seq.int(0, 360, 10))))
+  )
+    
+  pca_components_class4 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class4$v[1:37,1],
+    PC2 = pca_result_class4$v[1:37,2],
+    PC3 = pca_result_class4$v[1:37,3],
+    PC4 = pca_result_class4$v[1:37,4], 
+    class = as.factor(rep(4, length(seq.int(0, 360, 10))))
+  )
+  
+  pca_components_class9 <- data.frame(
+    DOY = seq.int(0, 360, 10),
+    PC1 = pca_result_class9$v[1:37,1],
+    PC2 = pca_result_class9$v[1:37,2],
+    PC3 = pca_result_class9$v[1:37,3],
+    PC4 = pca_result_class9$v[1:37,4], 
+    class = as.factor(rep(9, length(seq.int(0, 360, 10))))
+  )
+  
+  pca_components <- rbind(pca_components_class1, pca_components_class2,
+                          pca_components_class3, pca_components_class4,
+                          pca_components_class9)
+  
+  pca_components$class <- factor(pca_components$class, levels=c("1", "2", "3", "4", "9"), labels=c("DC soy", "SC soy", "cotton", "pasture", "soy-cotton"))
+
+  loadings_plot <- pca_components %>%
+    gather(key = 'PCs', value = 'loading', -c(DOY, class)) %>%
+    ggplot(aes(x = DOY, y = loading, color = class)) +
+    geom_line(size = 1) +
+    facet_wrap(~ PCs) +
+    labs(title = paste('Loadings on Principal Components for', data_name),
+      x = 'DOY since Jan 1') +
+    theme_linedraw() 
+  
+  return(loadings_plot)
+}
+
+```
+
+
+## Plotting
+
+```{r}
+
+print(make_screeplot(pca_agsat, "agsat (all classes)"))
+#print(make_screeplot(pca_agsat_class0, "agsat (class = 0)"))
+#print(make_screeplot(pca_agsat_class1, "agsat (class = 1)"))
+#print(make_screeplot(pca_agsat_class2, "agsat (class = 2)"))
+
+print(make_screeplot(pca_plos, "plos (all classes)"))
+#print(make_screeplot(pca_plos_class0, "plos (class = 0)"))
+#print(make_screeplot(pca_plos_class1, "plos (class = 1)"))
+#print(make_screeplot(pca_plos_class2, "plos (class = 2)"))
+
+print(make_loadings_plot(pca_agsat, "agsat"))
+print(make_loadings_plot(pca_plos, "plos"))
+print(make_loadings_plot_byClass(pca_agsat_class0, pca_agsat_class1, pca_agsat_class2, "agsat"))
+print(make_loadings_plot_byClass(pca_plos_class0, pca_plos_class1, pca_plos_class2, "plos"))
+print(make_loadings_plot_byOldClass(pca_plos_oldclass_class1, pca_plos_oldclass_class2, 
+                                    pca_plos_oldclass_class3, pca_plos_oldclass_class4, pca_plos_oldclass_class9, 
+                                    "plos by old class"))
+
+```
+

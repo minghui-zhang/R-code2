@@ -1,0 +1,10 @@
+name: toserver
+title:
+username:
+account: minghui-zhang
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1161553
+bundleId: 2394988
+url: https://minghui-zhang.shinyapps.io/toserver/
+when: 1567879982.12718

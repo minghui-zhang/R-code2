@@ -1,0 +1,469 @@
+---
+title: "Spatial Lag and Spatial Error"
+output: html_document
+---
+
+1. Spatial lag and spatial error models for one year
+2. Model evaluation (residual plots, residual autocorrelation)
+
+
+## read data
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(splm)
+library(lmtest)
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+
+## functions
+
+```{r}
+# test the models
+test_plots <- function(model, model_name) {
+  
+  plot(model$residuals, main = paste("residual vs index", model_name))
+
+  plot(model$fitted.values, model$residuals, main = paste("fitted values vs residuals", model_name))
+  
+  # normal probability plot
+  qqnorm(model$residuals, pch = 1, frame = FALSE, main = model_name)
+  qqline(model$residuals, col = "steelblue", lwd = 2)
+}
+
+# add cell_ID
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+
+# plot data
+plot_cell_onset <- function(year, cell_data) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = onset)) +
+   scale_fill_viridis() +
+   ggtitle(paste("Onset for spatial lag or error", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_residuals <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = residuals)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "residuals for spatial lag or error", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_plant <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = plant)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "plant for spatial lag or error", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+plot_cell_tempAuto <- function(year, cell_data, intensity) {
+  cell_year <- cell_data[cell_data$year == year, ]
+  
+  ggplot(cell_year) +
+   geom_sf(aes(fill = dwi.autocorr.p.value)) +
+   scale_fill_viridis() +
+   ggtitle(paste(intensity, "signif temporal autocorrelation for basic OLS", year)) +
+   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+   theme_bw()
+}
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+```
+
+## spatial lag, for one year
+source: https://rspatial.org/analysis/7-spregression.html
+
+```{r}
+year_oi <- 2008
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+
+nb <- poly2nb(cell_sf_tidy_year)
+lw <- nb2listw(nb, zero.policy = TRUE)
+
+# spatial lag model ---------------------------------------------------------------------
+model_lag = lagsarlm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_lag)
+cell_sf_tidy_year$residuals <- residuals(model_lag)
+cell_sf_tidy_year$fitted.values <- fitted.values(model_lag)
+
+# model evaluation: plant and onset maps (only those used in the actual modeling) --------------------------------------
+print(plot_cell_onset(year_oi, cell_sf_tidy_year))
+print(plot_cell_plant(year_oi, cell_sf_tidy_year[cell_sf_tidy_year$intensity == "DC",], "DC"))
+
+# model evaluation: residual vs fitted value and vs index, and residual qq plot ----------------------------------------
+
+plot(cell_sf_tidy_year$plant, cell_sf_tidy_year$residuals, main = "plant vs residuals")
+
+test_plots(model_lag, "model_lag")
+plot(cell_sf_tidy_year$plant, cell_sf_tidy_year$fitted.values, main = paste(year_oi, "spatial lag fitted value vs actual value of plant"))
+abline(h = mean(cell_sf_tidy_year$fitted.values), col = "blue")
+abline(v = mean(cell_sf_tidy_year$plant), col = "blue")
+abline(0,1, col = "gray", lwd = 3)
+
+# model evaluation: residual map --------------------------------------------------------------------------------------
+
+print(plot_cell_residuals(year_oi, cell_sf_tidy_year[cell_sf_tidy_year$intensity == "DC",], "DC"))
+
+
+# model evaluation: calculate R2 ---------------------------------------------------------------------------------------
+
+SST <- sum((cell_sf_tidy_year$plant - mean(cell_sf_tidy_year$plant))^2)
+SSE <- sum((cell_sf_tidy_year$residuals - mean(cell_sf_tidy_year$residuals))^2)
+R2 <- 1 - SSE/SST
+
+print(paste('R2:', R2))
+
+# model evaluation: correlations between plant and explanatory variables---------------
+print(paste("corr plant-onset", cor(cell_sf_tidy_year$plant, cell_sf_tidy_year$onset)))
+print(paste("corr plant-lat", cor(cell_sf_tidy_year$plant, cell_sf_tidy_year$lat)))
+print(paste("corr plant-year", cor(cell_sf_tidy_year$plant, cell_sf_tidy_year$year)))
+
+plot(cell_sf_tidy_year$onset, cell_sf_tidy_year$residuals, main = "spatial lag, onset vs residual (exogeneity)")
+plot(cell_sf_tidy_year$lat, cell_sf_tidy_year$residuals, main = "spatial lag, latitude vs residual (exogeneity)")
+
+
+# multicollinearity: correlation between predictors
+predictors <- cell_sf_tidy_year[,c("lat", "onset", "year")]
+st_geometry(predictors) <- NULL
+print(cor(predictors))
+
+# model evaluation: see if residuals are spatially autocorrelated with scatterplot -------------------------
+to_autocorrelation <- cell_sf_tidy_year[cell_sf_tidy_year$intensity == "DC", ]
+nb <- poly2nb(to_autocorrelation)
+resnb <- sapply(nb, function(x) mean(to_autocorrelation$residuals_lag[x]))
+#plot(to_autocorrelation$residuals_lag, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial lag,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_lag_residual <- moran.mc(to_autocorrelation$residuals, lw, 999, zero.policy = TRUE)
+print('moran for spatial lag, residual')
+moran_lag_residual
+moran_lag_onset <- moran.mc(to_autocorrelation$onset, lw, 999, zero.policy = TRUE)
+print('moran I of onset')
+print(moran_lag_onset)
+moran_lag_plant <- moran.mc(to_autocorrelation$plant, lw, 999, zero.policy = TRUE)
+print('moran I of plant')
+print(moran_lag_plant)
+
+# percent of total data that's used in regression
+# full year data:
+full_year_cell_sf_tidy <- cell_sf_tidy %>% 
+                    filter(year == year_oi)
+print(paste('percent total data used:', 100*nrow(cell_sf_tidy_year)/nrow(full_year_cell_sf_tidy)))
+
+
+```
+
+## evaluate predictions
+
+```{r}
+
+# runs the model with options to eliminate a year
+run_model <- function(full_data, year_to_train, year_to_elim, elim_year) {
+  
+  # separate training and test data
+  if (elim_year) {
+    train_data <- full_data[full_data$year == year_to_train,]
+    test_data <- full_data[full_data$year == year_to_elim,]
+  }
+  else {
+    train_data <- full_data
+    test_data <- full_data
+  }
+  
+
+  nb <- poly2nb(train_data)
+  lw <- nb2listw(nb, zero.policy = TRUE)
+  
+
+  model = lagsarlm(plant ~ onset + intensity + lat + onset:intensity, data=train_data, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+  model_intercept = lagsarlm(plant ~ 1, data=train_data, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+  
+  print(paste('model done', 'train year', year_to_train, 'elim year', year_to_elim))
+  # extract onset coef and R2 from model
+  onset_coef <- model$coefficients['onset']
+  train_data$residuals <- residuals(model)
+  SST <- sum((train_data$plant - mean(train_data$plant))^2)
+  SSE <- sum((train_data$residuals - mean(train_data$residuals))^2)
+  R2 <- 1 - SSE/SST
+  
+  # prediction
+  nb <- poly2nb(test_data)
+  lw <- nb2listw(nb, zero.policy = TRUE)
+  prediction <- predict(model, test_data, lw)
+  error <- rmse(prediction, test_data$plant)
+  
+  prediction_intercept <- predict(model_intercept, test_data, lw)
+  error_intercept <- rmse(prediction_intercept, test_data$plant)
+  
+  diff_error <- error_intercept - error
+  
+  # output
+  output <- c(as.integer(year_to_elim), onset_coef, R2, error, diff_error)
+  names(output) <- c("eliminated_year", "onset", "R2", "RMSE", "RMSE_improvement")
+  return(output)
+}
+
+# to store the data
+prediction_rmse <- matrix(ncol = 11, nrow = 11)
+rownames(prediction_rmse) <- 2004:2014
+colnames(prediction_rmse) <- 2004:2014
+
+prediction_improvement_rmse <- matrix(ncol = 11, nrow = 11)
+rownames(prediction_improvement_rmse) <- 2004:2014
+colnames(prediction_improvement_rmse) <- 2004:2014
+
+prediction_r2 <- matrix(ncol = 11, nrow = 11)
+rownames(prediction_r2) <- 2004:2014
+colnames(prediction_r2) <- 2004:2014
+
+prediction_onset <- matrix(ncol = 11, nrow = 11)
+rownames(prediction_onset) <- 2004:2014
+colnames(prediction_onset) <- 2004:2014
+
+# year used in training is row. year used to test is column
+for (year_to_train in 2004:2014) {
+  for (year_to_elim in 2004:2014) {
+    result <- run_model(cell_sf_tidy, year_to_train, year_to_elim, TRUE)
+    rmse <- result['RMSE']
+    rmse_improvement <- result['RMSE_improvement']
+    R2 <- result['R2']
+    onset <- result['onset']
+    
+    prediction_rmse[toString(year_to_train), toString(year_to_elim)] <- rmse
+    prediction_improvement_rmse[toString(year_to_train), toString(year_to_elim)] <- rmse_improvement
+    prediction_r2[toString(year_to_train), toString(year_to_elim)] <- R2
+    prediction_onset[toString(year_to_train), toString(year_to_elim)] <- onset
+  }
+}
+
+# take out diagonals (when training and testing were the same)
+diag(prediction_rmse) <- NA
+diag(prediction_improvement_rmse) <- NA
+diag(prediction_r2) <- NA
+diag(prediction_onset) <- NA
+
+# summarize by test year
+rmse_results <- data.frame(eliminated_year = 2004:2014, RMSE= apply(prediction_rmse, 2, mean, na.rm = TRUE), sd = apply(prediction_rmse, 2, sd, na.rm = TRUE))
+rmse_improvement_results <- data.frame(eliminated_year = 2004:2014, RMSE_improvement= apply(prediction_improvement_rmse, 2, mean, na.rm = TRUE), sd = apply(prediction_improvement_rmse, 2, sd, na.rm = TRUE))
+r2_results <- data.frame(eliminated_year = 2004:2014, R2= apply(prediction_r2, 2, mean, na.rm = TRUE), sd = apply(prediction_r2, 2, sd, na.rm = TRUE))
+onset_results <- data.frame(eliminated_year = 2004:2014, onset= apply(prediction_onset, 2, mean, na.rm = TRUE), sd = apply(prediction_onset, 2, sd, na.rm = TRUE))
+
+
+plot(rmse_results$eliminated_year, rmse_results$RMSE, 
+     ylab = "RMSE", xlab = "eliminated year", ylim = c(5, 25), type = "l", main = "Prediction RMSE, Spatial lag")
+arrows(rmse_results$eliminated_year, rmse_results$RMSE-rmse_results$sd, 
+       rmse_results$eliminated_year, rmse_results$RMSE+rmse_results$sd, length=0.05, angle=90, code=3)
+
+plot(rmse_improvement_results$eliminated_year, rmse_improvement_results$RMSE_improvement, 
+     ylab = "RMSE", xlab = "eliminated year", ylim = c(0, 10), type = "l", main = "Prediction RMSE improvement over intercept, Spatial lag")
+arrows(rmse_improvement_results$eliminated_year, rmse_improvement_results$RMSE_improvement-rmse_improvement_results$sd, 
+       rmse_improvement_results$eliminated_year, rmse_improvement_results$RMSE_improvement+rmse_improvement_results$sd, length=0.05, angle=90, code=3)
+
+plot(onset_results$eliminated_year, onset_results$onset, type = "l", col = "red", ylab = "coef or R2", xlab = "eliminated year", ylim = c(0.1, 0.7), main = "Prediction onset and R2, Spatial lag")
+arrows(onset_results$eliminated_year, onset_results$onset-onset_results$sd, 
+       onset_results$eliminated_year, onset_results$onset+onset_results$sd, length=0.05, angle=90, code=3, col = "red")
+lines(r2_results$eliminated_year, r2_results$R2, col = "blue")
+arrows(r2_results$eliminated_year, r2_results$R2-r2_results$sd, 
+       r2_results$eliminated_year, r2_results$R2+r2_results$sd, length=0.05, angle=90, code=3, col = "blue")
+legend(2004, 0.65, legend = c("onset coef", "R2"), col = c("red", "blue"), lty= c(1,1))
+
+```
+
+
+## spatial error, for one year
+
+```{r}
+year_oi <- 2010
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi)
+
+nb <- poly2nb(cell_sf_tidy_year)
+lw <- nb2listw(nb, zero.policy = TRUE)
+
+# spatial error model ---------------------------------------------------------------------
+model_error = errorsarlm(plant ~ onset + intensity + lat + onset:intensity, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_error)
+
+# model evaluation: plant and onset maps (only those used in the actual modeling) --------------------------------------
+print(plot_cell_onset(year_oi, cell_sf_tidy_year))
+print(plot_cell_plant(year_oi, cell_sf_tidy_year[cell_sf_tidy_year$intensity == "DC",], "DC"))
+
+# model evaluation: residual vs fitted value and vs index, and residual qq plot ----------------------------------------
+test_plots(model_error, "model_error")
+
+# model evaluation: residual map --------------------------------------------------------------------------------------
+cell_sf_tidy_year$residuals <- residuals(model_error)
+
+print(plot_cell_residuals(year_oi, cell_sf_tidy_year[cell_sf_tidy_year$intensity == "DC",], "DC"))
+
+plot(cell_sf_tidy_year$onset, cell_sf_tidy_year$residuals, main = "spatial error, onset vs residual (exogeneity)")
+plot(cell_sf_tidy_year$lat, cell_sf_tidy_year$residuals, main = "spatial error, latitude vs residual (exogeneity)")
+
+# model evaluation: see if residuals are spatially autocorrelated with scatterplot -------------------------
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals_error[x]))
+#plot(cell_sf_tidy_year$residuals_error, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial error,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_error <- moran.mc(cell_sf_tidy_year$residuals, lw, 999, zero.policy = TRUE)
+print('moran for spatial error')
+moran_error
+
+```
+
+## spatial lag, for one year, DC and SC separately
+source: https://rspatial.org/analysis/7-spregression.html
+
+```{r}
+year_oi <- 2008
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% 
+                    filter(intensity == "DC") %>%
+                    filter(year == year_oi)
+
+nb <- poly2nb(cell_sf_tidy_year)
+lw <- nb2listw(nb, zero.policy = TRUE)
+
+# spatial lag model ---------------------------------------------------------------------
+model_lag = lagsarlm(plant ~ onset + lat, data=cell_sf_tidy_year, lw, tol.solve=1.0e-30,
+                     zero.policy = TRUE)
+summary(model_lag)
+cell_sf_tidy_year$residuals <- residuals(model_lag)
+cell_sf_tidy_year$fitted.values <- fitted.values(model_lag)
+
+# model evaluation: plant and onset maps (only those used in the actual modeling) --------------------------------------
+print(plot_cell_onset(year_oi, cell_sf_tidy_year))
+print(plot_cell_plant(year_oi, cell_sf_tidy_year, "DC"))
+
+# model evaluation: residual vs fitted value and vs index, and residual qq plot ----------------------------------------
+test_plots(model_lag, "model_lag")
+plot(cell_sf_tidy_year$plant, cell_sf_tidy_year$fitted.values, main = paste(year_oi, "spatial lag fitted value vs actual value of plant"))
+
+# model evaluation: residual map --------------------------------------------------------------------------------------
+
+print(plot_cell_residuals(year_oi, cell_sf_tidy_year[cell_sf_tidy_year$intensity == "DC",], "DC"))
+
+# model evaluation: calculate R2 ---------------------------------------------------------------------------------------
+
+SST <- sum((cell_sf_tidy_year$plant - mean(cell_sf_tidy_year$plant))^2)
+SSE <- sum((cell_sf_tidy_year$residuals - mean(cell_sf_tidy_year$residuals))^2)
+R2 <- 1 - SSE/SST
+
+print(paste('R2:', R2))
+
+# model evaluation: correlations between plant and explanatory variables---------------
+print(paste("corr plant-onset", cor(cell_sf_tidy_year$plant, cell_sf_tidy_year$onset)))
+print(paste("corr plant-lat", cor(cell_sf_tidy_year$plant, cell_sf_tidy_year$lat)))
+print(paste('sd of fitted. values', sd(cell_sf_tidy_year$fitted.values)))
+
+plot(cell_sf_tidy_year$onset, cell_sf_tidy_year$residuals, main = "spatial lag, onset vs residual (exogeneity)")
+plot(cell_sf_tidy_year$lat, cell_sf_tidy_year$residuals, main = "spatial lag, latitude vs residual (exogeneity)")
+
+# model evaluation: see if residuals are spatially autocorrelated with scatterplot -------------------------
+nb <- poly2nb(cell_sf_tidy_year)
+resnb <- sapply(nb, function(x) mean(cell_sf_tidy_year$residuals_lag[x]))
+#plot(cell_sf_tidy_year$residuals_lag, resnb, xlab='Residuals', ylab='Mean adjacent residuals', main = paste("Spatial lag,", year_oi))
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_lag <- moran.mc(cell_sf_tidy_year$residuals, lw, 999, zero.policy = TRUE)
+print('moran for spatial lag')
+moran_lag
+
+# percent of total data that's used in regression
+# full year data:
+full_year_cell_sf_tidy <- cell_sf_tidy %>% 
+                    filter(intensity == "DC") %>%
+                    filter(year == year_oi)
+print(paste('percent total data used:', 100*nrow(cell_sf_tidy_year)/nrow(full_year_cell_sf_tidy)))
+
+
+```
+
+## export
+
+```{r}
+# for app.R
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na %>%
+                              mutate(year_factor = as.factor(year))
+saveRDS(as(cell_sf_tidy, 'Spatial'), "./cell_spdf.rds")
+
+```
