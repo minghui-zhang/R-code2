@@ -1,0 +1,303 @@
+---
+title: "Random Forest"
+output: html_document
+---
+
+1. Sample cells at 100km distance to skip spatial autocorrelation
+2. Random forest
+3. Model evaluation.
+4. Repeat above for consistency
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics) # for rmse
+library(leaflet)
+
+# random forest, decision tree
+library(randomForest)
+library(rpart)
+library(caret)
+library(e1071)
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+source('E:/R-code/Modeling/code/FCN_plotting.R')
+source('E:/R-code/Modeling/code/FCN_sample_data.R')
+source('E:/R-code/Modeling/code/FCN_run_model_spatial_sampled.R')
+
+MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+onset_type <- 'Gabriel_onset'
+
+median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+percentile5_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile5_onset_cell_v2.csv')
+percentile95_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile95_onset_cell_v2.csv')
+
+grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  
+cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile95_cell <- percentile95_cell_raw %>% rename_cols_percentile_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+
+cell_sf_percentile95 <- cell_sf
+cell_sf_percentile95$SC_plant <- percentile95_cell$SC_plant
+cell_sf_percentile95$DC_plant <- percentile95_cell$DC_plant
+cell_sf_percentile95$plant_stat_type <- rep("percentile95", nrow(cell_sf_percentile95))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile95)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+
+```
+
+## random forest, OLS comparison
+
+```{r}
+
+set.seed(100)
+wanted_variables <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity', 'plant', 'cell_ID')
+wanted_predictors <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity')
+f <- as.formula(paste('plant ~', paste(wanted_predictors, collapse = " + ")))
+
+wanted_plant_stat <- "median"
+
+for (sample_data in c(FALSE)) {
+  # prepare data. cell_df has the sampled data with appropriate plant_stat, and cell_sf adds the geometry
+  if (sample_data) {
+    sampled_data <- get_sampled_data(full_data = cell_sf_tidy, plant_stat = wanted_plant_stat, grid_size = 0.75, 
+                                     lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, 
+                                     plot_samples = FALSE, year_oi = 2008)
+    cell_sf <- sampled_data
+    cell_df <- sampled_data
+    st_geometry(cell_df) <- NULL
+  }
+  
+  if (!sample_data) {
+    cell_sf <- cell_sf_tidy
+    cell_df <- cell_sf_tidy
+    st_geometry(cell_df) <- NULL
+  }
+  
+  cell_df <- cell_df[cell_df$plant_stat_type == wanted_plant_stat, wanted_variables]
+  cell_df$intensity <- as.factor(cell_df$intensity)
+  cell_df$region <- as.factor(cell_df$region)
+  cell_sf <- cell_sf[cell_sf$plant_stat_type == wanted_plant_stat, wanted_variables]
+  
+  # random forest: regular validaton, 30% randomly eliminated  ----------------------------------------------
+  # split into train and validation sets for 30% validation
+  train_indeces <- sample(nrow(cell_df), 0.7*nrow(cell_df), replace = FALSE)
+  train <- cell_df[train_indeces,]
+  valid <- cell_df[-train_indeces,]
+  
+  rf_model1 <- randomForest(f, data = train, importance = TRUE, ntree = 600, mtry = 2)
+  valid$rf_predicted_plant <- predict(rf_model1, valid)
+  plot(valid$plant, valid$rf_predicted_plant, main = 'rf')
+  abline(a = 0, b = 1)
+
+  importance(rf_model1)
+  varImpPlot(rf_model1)
+
+  rf_error <- rmse(valid$plant, valid$rf_predicted_plant)
+  
+  # random forest: eliminate year ---------------------------------------------------------------------------
+  # for (elim_year in 2004:2014) {
+  #   result <- test_elimyear(elim_year, cell_df, cell_sf, f, "rf")
+  #   print(result)
+  # }
+
+  # random forest: eliminate cell -------------------------------------------------------------------------
+  unique_cells <- unique(cell_df[cell_df$year == 2004, "cell_ID"])
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC", ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
+  
+  for (elim_cell in unique_cells) {
+    result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "rf", f)
+    print(result)
+      
+    # for mapping
+    cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+  }
+  
+  elimcell_error_map <- ggplot(cell_sf_elimcell) +
+    geom_sf(aes(fill = error)) +
+    scale_fill_viridis() +
+    ggtitle(paste("Plant prediction error, eliminated individual cell")) +
+    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+    theme_bw()
+
+  print(elimcell_error_map)
+  
+  # ols: regular validaton, 30% randomly eliminated  ----------------------------------------------
+  
+  ols_model1 <- lm(f, data = train)
+  valid$ols_predicted_plant <- predict(ols_model1, valid)
+  plot(valid$plant, valid$ols_predicted_plant, main = 'ols')
+  abline(a = 0, b = 1)
+  
+  ols_error <- rmse(valid$plant, valid$ols_predicted_plant)
+  
+  # ols: eliminate year -----------------------------------------------------------------------------
+  
+  # for (elim_year in 2004:2014) {
+  #   result <- test_elimyear(elim_year, cell_df, cell_sf, f, "ols")
+  #   print(result)
+  # }
+  # 
+}
+
+test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type) {
+  
+  # eliminate a year and test it; model_type is ols or rf
+  train_elimyear <- cell_df[cell_df$year != elim_year,]
+  valid_elimyear <- cell_df[cell_df$year == elim_year,]
+  
+  # fit model
+  if (model_type == "rf") {
+    model <- randomForest(f, data = train_elimyear, importance = TRUE, ntree = 500, mtry = 2)
+  }
+  
+  if (model_type == "ols") {
+    model <- lm(f, data = train_elimyear)
+  }
+  
+  valid_elimyear$predicted_plant <- predict(model, valid_elimyear)
+  plot(valid_elimyear$plant, valid_elimyear$predicted_plant, main = paste('eliminated', elim_year, model_type))
+  abline(a = 0, b = 1)
+  
+  rmse_elimyear <- rmse(valid_elimyear$plant, valid_elimyear$predicted_plant)
+  error_elimyear <- mean(valid_elimyear$predicted_plant - valid_elimyear$plant)
+  
+  # map error
+  cell_sf_elimyear$error <- valid_elimyear$predicted_plant - valid_elimyear$plant
+  elimyear_error_map <- ggplot(cell_sf_elimyear) +
+    geom_sf(aes(fill = error)) +
+    scale_fill_viridis() +
+    ggtitle(paste("Plant prediction error, eliminated ", elim_year, model_type)) +
+    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+    theme_bw()
+  print(elimyear_error_map)
+  
+  return(data.frame(elim_year = c(elim_year),
+                    rmse_elimyear = c(rmse_elimyear),
+                    error_elimyear = c(error_elimyear)))
+
+}
+
+test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
+  train_elimcell <- cell_df[cell_df$cell_ID != elim_cell,]
+  valid_elimcell <- cell_df[cell_df$cell_ID == elim_cell,]
+  
+  # for mapping
+  cell_sf_elimcell <- cell_sf[cell_sf$cell_ID == elim_cell, ]
+  
+  # fit model
+  if (model_type == "rf") {
+    model <- randomForest(f, data = train_elimcell, importance = TRUE, ntree = 600, mtry = 2)
+  }
+  
+  if (model_type == "ols") {
+    model <- lm(f, data = train_elimcell)
+  }
+  
+  valid_elimcell$predicted_plant <- predict(model, valid_elimcell)
+  #plot(valid_elimcell$plant, valid_elimcell$predicted_plant, main = paste('eliminated cell', elim_cell, model_type))
+  #abline(a = 0, b = 1)
+  
+  rmse_elimcell <- rmse(valid_elimcell$plant, valid_elimcell$predicted_plant)
+  error_elimcell <- mean(valid_elimcell$predicted_plant - valid_elimcell$plant)
+
+  return(data.frame(elim_cell = c(elim_cell),
+                    rmse_elimcell = c(rmse_elimcell),
+                    error_elimcell = c(error_elimcell)))
+
+}
+
+
+# split into train and validation sets, where train on a new cell
+
+
+
+
+
+
+
+
+
+
+```
+
+## extra
+
+```{r}
+
+# decision tree model --------------------------------------------------------
+dt_model1 <- caret::train(plant ~ ., data = train, method = "rpart")
+valid$dt_predicted_plant <- predict(dt_model1, valid)
+plot(valid$plant, valid$dt_predicted_plant, main = 'dt')
+abline(a = 0, b = 1)
+
+dt_error <- rmse(valid$plant, valid$dt_predicted_plant)
+print(paste('dt_error', dt_error))
+
+```
