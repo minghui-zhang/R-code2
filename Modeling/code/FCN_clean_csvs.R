@@ -7,7 +7,7 @@ delete_cols_median_cell <- function(median_cell_raw) {
   output = subset(median_cell_raw, select = -c(double_area_km2_median, 
                                                double_delay_sum, double_harvest_sum, double_plant_sum,
                                                label, latitude_sum, longitude_sum, 
-                                               onset_sum, single_area_km2_median, onset_historicalRange_sum, 
+                                               onset_sum, single_area_km2_median, #onset_historicalRange_sum, 
                                                single_delay_sum, single_harvest_sum, single_plant_sum,
                                                total_planted_area_km2_median, year_sum, Muni_code_sum) )
   return(output)
@@ -23,7 +23,7 @@ rename_cols_median_cell <- function(median_cell) {
       double_plant = double_plant_median,
       latitude = latitude_median,
       longitude = longitude_median,
-      onset_historicalRange = onset_historicalRange_median,
+      #onset_historicalRange = onset_historicalRange_median,
       onset = onset_median,
       single_area_km2 = single_area_km2_sum,
       single_delay = single_delay_median,
