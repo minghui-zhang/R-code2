@@ -4,9 +4,8 @@ output: html_document
 ---
 
 1. Sample cells at 100km distance to skip spatial autocorrelation
-2. Random forest
+2. Random forest and other ML methods
 3. Model evaluation.
-4. Repeat above for consistency
 
 ## read data
 
@@ -33,7 +32,9 @@ library(leaflet)
 library(randomForest)
 library(rpart)
 library(caret)
-library(e1071)
+library(e1071) # svm
+library(gbm) # boosting
+#library(FNN) # k nearest neighbors, but DON'T LOAD THIS PACKAGE BECAUSE knn fcn is USED IN ANOTHER CONTEXT TOO
 
 #E:/R-code/Modeling/code/FCN_clean_csvs.R
 #~/Documents/R-code
@@ -42,7 +43,7 @@ source('E:/R-code2/Modeling/code/FCN_plotting.R')
 source('E:/R-code2/Modeling/code/FCN_sample_data.R')
 source('E:/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R')
 
-onset_type <- 'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+onset_type <- 'Gabriel_onset' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
 #onset_type <- 'Gabriel_onset'
 
 if (onset_type != 'Gabriel_onset') {
@@ -134,6 +135,9 @@ cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
 
 test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type) {
   
+  print('model_type')
+  print(model_type)
+  
   # eliminate a year and test it; model_type is ols or rf
   train_elimyear <- cell_df[cell_df$year != elim_year,]
   valid_elimyear <- cell_df[cell_df$year == elim_year,]
@@ -148,7 +152,24 @@ test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type) {
     model <- lm(f, data = train_elimyear)
   }
   
-  valid_elimyear$predicted_plant <- predict(model, valid_elimyear)
+  
+  if (model_type == "svm") {
+    model <- svm(f, data = train_elimyear)
+  }
+  
+  if (model_type == "boost") {
+    model <- gbm(f, data = train_elimyear, distribution = "gaussian", 
+                    n.trees = 5000, interaction.depth = 2, shrinkage = 0.01)
+  }
+  
+  if (model_type != "boost") {
+    valid_elimyear$predicted_plant <- predict(model, valid_elimyear)
+  }
+  
+  if (model_type == "boost") {
+    valid_elimyear$predicted_plant <- predict(model, valid_elimyear, n.trees = 5000)
+  }
+  
   plot(valid_elimyear$plant, valid_elimyear$predicted_plant, main = paste('eliminated', elim_year, model_type))
   abline(a = 0, b = 1)
   
@@ -175,6 +196,9 @@ test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type) {
 }
 
 test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
+  
+  print('model_type')
+  print(model_type)
   train_elimcell <- cell_df[cell_df$cell_ID != elim_cell,]
   valid_elimcell <- cell_df[cell_df$cell_ID == elim_cell,]
   
@@ -190,7 +214,23 @@ test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
     model <- lm(f, data = train_elimcell)
   }
   
-  valid_elimcell$predicted_plant <- predict(model, valid_elimcell)
+  if (model_type == "svm") {
+    model <- svm(f, data = train_elimcell)
+  }
+  
+  if (model_type == "boost") {
+    model <- gbm(f, data = train_elimcell, distribution = "gaussian", 
+                    n.trees = 5000, interaction.depth = 2, shrinkage = 0.01)
+  }
+  
+  if (model_type != "boost") {
+    valid_elimcell$predicted_plant <- predict(model, valid_elimcell)
+  }
+  
+  if (model_type == "boost") {
+    valid_elimcell$predicted_plant <- predict(model, valid_elimcell, n.trees = 5000)
+  }
+  
   #plot(valid_elimcell$plant, valid_elimcell$predicted_plant, main = paste('eliminated cell', elim_cell, model_type))
   #abline(a = 0, b = 1)
   
@@ -212,12 +252,16 @@ test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
 
 ```{r}
 
+do_elimcell <- TRUE
+do_elimyear <- TRUE
+cell_reducer <- 10 # the number of cells by this when NOT sampling data and doing elimcell
+
 set.seed(100)
 wanted_variables <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity', 'plant', 'cell_ID')
 wanted_predictors <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity')
 f <- as.formula(paste('plant ~', paste(wanted_predictors, collapse = " + ")))
 
-wanted_plant_stat <- "median"
+wanted_plant_stat <- "percentile5"
 
 # to store prediction results
 prediction_error_results <- data.frame(model_type = character(0),
@@ -279,59 +323,215 @@ for (sample_data in c(FALSE)) {
                                            sampled_data = c(sample_data)))
   
   # random forest: eliminate year ---------------------------------------------------------------------------
-  for (elim_year in 2004:2014) {
-    result <- test_elimyear(elim_year, cell_df, cell_sf, f, "rf")
-    
-    prediction_error_results <- rbind(prediction_error_results,
-                                    
-                                data.frame(model_type = c('rf'),
-                                           elim_type = c('year'),
-                                           elim_year = c(elim_year),
-                                           elim_cell = c(NA),
-                                           rmse = c(result$rmse_elimyear),
-                                           error = c(result$error_elimyear),
-                                           sampled_data = c(sample_data)))
-    #print(result)
+  if (do_elimyear) {
+    for (elim_year in 2004:2014) {
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "rf")
+  
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('rf'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                             sampled_data = c(sample_data)))
+      #print(result)
+    }
   }
 
   # random forest: eliminate cell -------------------------------------------------------------------------
-  # unique_cells <- unique(cell_df[cell_df$year == 2004, "cell_ID"])
-  # if (!sample_data) {
-  #   chosen_cells <- sample(unique_cells, length(unique_cells)/200, replace = FALSE) # randomly select some unique cells, otherwise too much data
-  # }
-  # if (sample_data) {
-  #   chosen_cells <- unique_cells
-  # }
-  # cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" & 
-  #                               cell_sf$cell_ID %in% chosen_cells, ] # to store error values
-  # cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
-  # 
-  # for (elim_cell in chosen_cells) {
-  #   result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "rf", f)
-  #   
-  #   # save
-  #   prediction_error_results <- rbind(prediction_error_results,
-  #                                   
-  #                               data.frame(model_type = c('rf'),
-  #                                          elim_type = c('cell'),
-  #                                          elim_year = c(NA),
-  #                                          elim_cell = c(elim_cell),
-  #                                          rmse = c(result$rmse_elimcell),
-  #                                          error = c(result$error_elimcell),
-  #                                          sampled_data = c(sample_data)))
+  unique_cells <- unique(cell_df[cell_df$year == 2004, "cell_ID"])
+  if (!sample_data) {
+    chosen_cells <- sample(unique_cells, length(unique_cells)/cell_reducer, replace = FALSE) # randomly select some unique cells, otherwise too much data
+  }
+  if (sample_data) {
+    chosen_cells <- unique_cells
+  }
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
+                                cell_sf$cell_ID %in% chosen_cells, ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
 
-    # for mapping
-  #  cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
-  #  }
+  if (do_elimcell) {
+    for (elim_cell in chosen_cells) {
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "rf", f)
+  
+      # save
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('rf'),
+                                             elim_type = c('cell'),
+                                             elim_year = c(NA),
+                                             elim_cell = c(elim_cell),
+                                             rmse = c(result$rmse_elimcell),
+                                             error = c(result$error_elimcell),
+                                             sampled_data = c(sample_data)))
+  
+      # for mapping
+      cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+      }
+  
+    elimcell_error_map <- ggplot(cell_sf_elimcell) +
+      geom_sf(aes(fill = error)) +
+      scale_fill_viridis() +
+      ggtitle(paste("Random forest prediction error, eliminated individual cell")) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+  
+    print(elimcell_error_map)
+  }
+  
+  # svm: regular validaton, 30% randomly eliminated  ----------------------------------------------
+  
+  svm_model <- svm(f, data = train)
+  valid$svm_predicted_plant <- predict(svm_model, valid)
+  plot(valid$plant, valid$svm_predicted_plant, main = 'rf')
+  abline(a = 0, b = 1)
 
-  # elimcell_error_map <- ggplot(cell_sf_elimcell) +
-  #   geom_sf(aes(fill = error)) +
-  #   scale_fill_viridis() +
-  #   ggtitle(paste("Random forest prediction error, eliminated individual cell")) +
-  #   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
-  #   theme_bw()
-  # 
-  # print(elimcell_error_map)
+  svm_rmse <- rmse(valid$plant, valid$svm_predicted_plant)
+  svm_error <- mean(valid$svm_predicted_plant - valid$plant)
+  
+  # save
+  prediction_error_results <- rbind(prediction_error_results,
+                                    
+                                data.frame(model_type = c('svm'),
+                                           elim_type = c('30%'),
+                                           elim_year = c(NA),
+                                           elim_cell = c(NA),
+                                           rmse = c(svm_rmse),
+                                           error = c(svm_error),
+                                           sampled_data = c(sample_data)))
+  
+  #svm: eliminate year --------------------------------------------------------------------------------
+  
+
+  
+  if (do_elimyear) {
+    for (elim_year in 2004:2014) {
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "svm")
+      
+      prediction_error_results <- rbind(prediction_error_results,
+                                      
+                                  data.frame(model_type = c('svm'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                             sampled_data = c(sample_data)))
+      #print(result)
+    }
+  }
+  
+  # svm: eliminate cell --------------------------------------------------------------------------
+  
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
+                                cell_sf$cell_ID %in% chosen_cells, ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
+  
+  if (do_elimcell) {
+    for (elim_cell in chosen_cells) {
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "svm", f)
+  
+      # save
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('svm'),
+                                             elim_type = c('cell'),
+                                             elim_year = c(NA),
+                                             elim_cell = c(elim_cell),
+                                             rmse = c(result$rmse_elimcell),
+                                             error = c(result$error_elimcell),
+                                             sampled_data = c(sample_data)))
+  
+      # for mapping
+      cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+      }
+  
+    elimcell_error_map <- ggplot(cell_sf_elimcell) +
+      geom_sf(aes(fill = error)) +
+      scale_fill_viridis() +
+      ggtitle(paste("SVM prediction error, eliminated individual cell")) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+  
+    print(elimcell_error_map)
+  }
+  
+  # boosting: regular validaton, 30% randomly eliminated  ----------------------------------------------
+  
+  boost_model <- gbm(f, data = train, distribution = "gaussian", 
+                    n.trees = 5000, interaction.depth = 2, shrinkage = 0.01)
+  valid$boost_predicted_plant <- predict(boost_model, valid, n.trees = 5000)
+  plot(valid$plant, valid$boost_predicted_plant, main = 'boost')
+  abline(a = 0, b = 1)
+
+  boost_rmse <- rmse(valid$plant, valid$boost_predicted_plant)
+  boost_error <- mean(valid$boost_predicted_plant - valid$plant)
+  
+  # save
+  prediction_error_results <- rbind(prediction_error_results,
+                                    
+                                data.frame(model_type = c('boost'),
+                                           elim_type = c('30%'),
+                                           elim_year = c(NA),
+                                           elim_cell = c(NA),
+                                           rmse = c(boost_rmse),
+                                           error = c(boost_error),
+                                           sampled_data = c(sample_data)))
+  
+  # boosting: eliminate year ---------------------------------------------------------------------------
+  if (do_elimyear) {
+    for (elim_year in 2004:2014) {
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "boost")
+      
+      prediction_error_results <- rbind(prediction_error_results,
+                                      
+                                  data.frame(model_type = c('boost'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                             sampled_data = c(sample_data)))
+      #print(result)
+    }
+  }
+  
+  # boosting: eliminate cell ------------------------------------------------------------------------
+  
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
+                                cell_sf$cell_ID %in% chosen_cells, ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
+  
+  if (do_elimcell) {
+    for (elim_cell in chosen_cells) {
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "boost", f)
+  
+      # save
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('boost'),
+                                             elim_type = c('cell'),
+                                             elim_year = c(NA),
+                                             elim_cell = c(elim_cell),
+                                             rmse = c(result$rmse_elimcell),
+                                             error = c(result$error_elimcell),
+                                             sampled_data = c(sample_data)))
+  
+      # for mapping
+      cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+      }
+  
+    elimcell_error_map <- ggplot(cell_sf_elimcell) +
+      geom_sf(aes(fill = error)) +
+      scale_fill_viridis() +
+      ggtitle(paste("Boosting prediction error, eliminated individual cell")) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+  
+    print(elimcell_error_map)
+  }
   
   # ols: regular validaton, 30% randomly eliminated  ----------------------------------------------
   
@@ -356,56 +556,60 @@ for (sample_data in c(FALSE)) {
   
   # ols: eliminate year -----------------------------------------------------------------------------
   
-  for (elim_year in 2004:2014) {
-    result <- test_elimyear(elim_year, cell_df, cell_sf, f, "ols")
-    prediction_error_results <- rbind(prediction_error_results,
-                                    
-                                data.frame(model_type = c('ols'),
-                                           elim_type = c('year'),
-                                           elim_year = c(elim_year),
-                                           elim_cell = c(NA),
-                                           rmse = c(result$rmse_elimyear),
-                                           error = c(result$error_elimyear),
-                                           sampled_data = c(sample_data)))
-     
-    # print(result)
+  if (do_elimyear) {
+    for (elim_year in 2004:2014) {
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "ols")
+      prediction_error_results <- rbind(prediction_error_results,
+                                      
+                                  data.frame(model_type = c('ols'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                             sampled_data = c(sample_data)))
+       
+      # print(result)
+    }
   }
 
   
   # ols: eliminate cell -------------------------------------------------------------------------
   # chosen_cells was defined at rf's eliminate cell section
-  # cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" & 
-  #                               cell_sf$cell_ID %in% chosen_cells, ] # to store error values
-  # cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
-  # 
-  # for (elim_cell in chosen_cells) {
-  #   result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "ols", f)
-  #   
-  #   # save
-  #   prediction_error_results <- rbind(prediction_error_results,
-  #                                   
-  #                               data.frame(model_type = c('ols'),
-  #                                          elim_type = c('cell'),
-  #                                          elim_year = c(NA),
-  #                                          elim_cell = c(elim_cell),
-  #                                          rmse = c(result$rmse_elimcell),
-  #                                          error = c(result$error_elimcell),
-  #                                          sampled_data = c(sample_data)))
-  #   
-  #   # print(result)
-  # 
-  #   # for mapping
-  #   cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
-  # }
-  # 
-  # elimcell_error_map <- ggplot(cell_sf_elimcell) +
-  #   geom_sf(aes(fill = error)) +
-  #   scale_fill_viridis() +
-  #   ggtitle(paste("OLS prediction error, eliminated individual cell")) +
-  #   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
-  #   theme_bw()
-  # 
-  # print(elimcell_error_map)
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
+                                cell_sf$cell_ID %in% chosen_cells, ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
+
+  if (do_elimcell) {
+    for (elim_cell in chosen_cells) {
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "ols", f)
+  
+      # save
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('ols'),
+                                             elim_type = c('cell'),
+                                             elim_year = c(NA),
+                                             elim_cell = c(elim_cell),
+                                             rmse = c(result$rmse_elimcell),
+                                             error = c(result$error_elimcell),
+                                             sampled_data = c(sample_data)))
+  
+      # print(result)
+  
+      # for mapping
+      cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+    }
+  
+    elimcell_error_map <- ggplot(cell_sf_elimcell) +
+      geom_sf(aes(fill = error)) +
+      scale_fill_viridis() +
+      ggtitle(paste("OLS prediction error, eliminated individual cell")) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+  
+    print(elimcell_error_map)
+  }
 }
 
 
@@ -417,10 +621,7 @@ for (sample_data in c(FALSE)) {
 
 elimyear_results <- prediction_error_results[prediction_error_results$elim_type == "year",]
 
-print('elim year, rf, mean rmse')
-mean(elimyear_results[elimyear_results$model_type == "rf",]$rmse)
-print('elim year, ols, mean rmse')
-mean(elimyear_results[elimyear_results$model_type == "ols",]$rmse)
+
 
 ggplot(elimyear_results, aes(x = elim_year, y = rmse, col = model_type)) +
   geom_line() +
@@ -435,11 +636,6 @@ ggplot(elimyear_results, aes(x = elim_year, y = error, col = model_type)) +
 
 elimcell_results <- prediction_error_results[prediction_error_results$elim_type == "cell",]
 
-print('elim cell, rf, mean rmse')
-mean(elimcell_results[elimcell_results$model_type == "rf",]$rmse)
-print('elim cell, ols, mean rmse')
-mean(elimcell_results[elimcell_results$model_type == "ols",]$rmse)
-
 ggplot(elimcell_results, aes(x = elim_cell, y = rmse, col = model_type)) +
   geom_point() +
   ggtitle('eliminated cell, rmse') + 
@@ -449,19 +645,104 @@ ggplot(elimcell_results, aes(x = elim_cell, y = error, col = model_type)) +
   geom_point() +
   ggtitle('eliminated cell, error') + 
   theme_bw()
+
+# print('elim cell, svm, mean rmse')
+# mean(elimcell_results[elimcell_results$model_type == "svm",]$rmse)
+# print('elim cell, ols, mean rmse')
+# mean(elimcell_results[elimcell_results$model_type == "ols",]$rmse)
+
+print('elim year, boosting, mean rmse')
+mean(elimyear_results[elimyear_results$model_type == "boost",]$rmse)
+print('elim year, svm, mean rmse')
+mean(elimyear_results[elimyear_results$model_type == "svm",]$rmse)
+print('elim year, rf, mean rmse')
+mean(elimyear_results[elimyear_results$model_type == "rf",]$rmse)
+print('elim year, ols, mean rmse')
+mean(elimyear_results[elimyear_results$model_type == "ols",]$rmse)
+
+print('elim cell, boosting, mean rmse')
+mean(elimcell_results[elimcell_results$model_type == "boost",]$rmse)
+print('elim cell, svm, mean rmse')
+mean(elimcell_results[elimcell_results$model_type == "svm",]$rmse)
+print('elim cell, rf, mean rmse')
+mean(elimcell_results[elimcell_results$model_type == "rf",]$rmse)
+print('elim cell, ols, mean rmse')
+mean(elimcell_results[elimcell_results$model_type == "ols",]$rmse)
 ```
 
 ## extra
 
 ```{r}
+# prep data
+wanted_predictors <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity')
+wanted_plant_stat <- "median"
+f <- as.formula(paste('plant ~', paste(wanted_predictors, collapse = " + ")))
+sampled_data <- get_sampled_data(full_data = cell_sf_tidy, plant_stat = wanted_plant_stat, grid_size = 0.75, 
+                                     lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, 
+                                     plot_samples = FALSE, year_oi = 2008)
+cell_sf <- sampled_data
+cell_df <- sampled_data
+st_geometry(cell_df) <- NULL
+cell_df$region <- as.factor(cell_df$region)
+cell_df$intensity <- as.factor(cell_df$intensity)
 
+train_indeces <- sample(nrow(cell_df), 0.7*nrow(cell_df), replace = FALSE)
+train <- cell_df[train_indeces,]
+valid <- cell_df[-train_indeces,]
+  
+# knn -----------------------------------------------------------------------
+# wanted_predictors_knn <- c('year', 'lat', 'lon', 'onset')
+# train_DC <- train[train$intensity == "DC",]
+# valid_DC <- valid[valid$intensity == "DC",]
+# knn_model <- FNN::knn.reg(train = train_DC[, wanted_predictors_knn], test = valid_DC[,wanted_predictors_knn], y = train[, "plant"], k = 50)
+# 
+# valid_DC$knn_predicted_plant <- knn_model$pred
+# plot(valid_DC$plant, valid_DC$knn_predicted_plant, main = 'boost')
+# abline(a = 0, b = 1)
+# 
+# knn_rmse <- rmse(valid_DC$plant, valid_DC$knn_predicted_plant)
+# print('knn rmse')
+# print(knn_rmse)
+
+# boosting ------------------------------------------------------------------
+
+# 
+# boost_model <- gbm(f, data = train, distribution = "gaussian", 
+#                     n.trees = 5000, interaction.depth = 2, shrinkage = 0.01)
+# valid$boost_predicted_plant <- predict(boost_model, valid, n.trees= 5000)
+# plot(valid$plant, valid$boost_predicted_plant, main = 'boost')
+# abline(a = 0, b = 1)
+# 
+# boost_rmse <- rmse(valid$plant, valid$boost_predicted_plant)
+# print('boost rmse')
+# print(boost_rmse)
+
+# support vector regression --------------------------------------------------
+
+# svm_model <- svm(f, train)
+# 
+# valid$svm_predicted_plant <- predict(svm_model, valid)
+# plot(valid$plant, valid$svm_predicted_plant, main = 'svm')
+# abline(a = 0, b = 1)
+# 
+# svm_rmse <- rmse(valid$plant, valid$svm_predicted_plant)
+# print('svm rmse')
+# print(svm_rmse)
+# 
+# tuneResult <- tune(svm, f,  data = train,
+#               ranges = list(epsilon = seq(0,1,0.1), cost = 2^(2:9))
+# )
+# print(tuneResult)
+# # Draw the tuning graph
+# plot(tuneResult)
+  
 # decision tree model --------------------------------------------------------
-dt_model1 <- caret::train(plant ~ ., data = train, method = "rpart")
-valid$dt_predicted_plant <- predict(dt_model1, valid)
-plot(valid$plant, valid$dt_predicted_plant, main = 'dt')
-abline(a = 0, b = 1)
-
-dt_error <- rmse(valid$plant, valid$dt_predicted_plant)
-print(paste('dt_error', dt_error))
+# dt_model1 <- caret::train(plant ~ ., data = train, method = "rpart")
+# valid$dt_predicted_plant <- predict(dt_model1, valid)
+# plot(valid$plant, valid$dt_predicted_plant, main = 'dt')
+# abline(a = 0, b = 1)
+# 
+# dt_error <- rmse(valid$plant, valid$dt_predicted_plant)
+# print(paste('dt_error', dt_error))
 
 ```
