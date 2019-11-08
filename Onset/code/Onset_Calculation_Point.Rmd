@@ -1,0 +1,130 @@
+---
+title: "Onset_Calculation_Point"
+output: html_document
+---
+
+## repeat onset calculations in R and compare to GEE
+
+# import and clean data
+
+```{r}
+persiann_pt1 <- read.csv('E:/R-code2/Onset/data/persiann_pt1_precip.csv')
+persiann_pt2 <- read.csv('E:/R-code2/Onset/data/persiann_pt2_precip.csv')
+persiann_pt3 <- read.csv('E:/R-code2/Onset/data/persiann_pt2_precip.csv')
+chirps_pt1 <- read.csv('E:/R-code2/Onset/data/chirps_pt1_precip.csv')
+chirps_pt2 <- read.csv('E:/R-code2/Onset/data/chirps_pt2_precip.csv')
+chirps_pt3 <- read.csv('E:/R-code2/Onset/data/chirps_pt2_precip.csv')
+
+persiann <- data.frame(date = persiann_pt1$date,
+                       precip_1 = persiann_pt1$precip,
+                       precip_2 = persiann_pt2$precip,
+                       precip_3 = persiann_pt3$precip) 
+
+chirps <- data.frame(date = chirps_pt1$date,
+                       precip_1 = chirps_pt1$precip,
+                       precip_2 = chirps_pt2$precip,
+                       precip_3 = chirps_pt3$precip) 
+
+# add days after Aug 1
+persiann$DOY_Aug1 <- seq(0, 363)
+chirps$DOY_Aug1 <- seq(0, 363)
+
+```
+
+## AA
+
+
+## threshold
+First day after Aug 1 with rainfall > threshold (10 mm)
+
+```{r}
+
+thres_onset <- function(precip_df, point, thres) {
+  precip <- precip_df[,point]
+  
+  wet_days <- precip_df$DOY_Aug1[precip >= thres]
+  
+  if (length(wet_days) == 0) {onset <- 364}
+  else {onset <- min(wet_days)}
+
+  return(onset)
+}
+
+print(thres_onset(precip_df = persiann, point = 'precip_1', thres = 1000))
+print(thres_onset(precip_df = persiann, point = 'precip_2', thres = 10))
+print(thres_onset(precip_df = persiann, point = 'precip_3', thres = 10))
+
+print(thres_onset(precip_df = chirps, point = 'precip_1', thres = 10))
+print(thres_onset(precip_df = chirps, point = 'precip_2', thres = 10))
+print(thres_onset(precip_df = chirps, point = 'precip_3', thres = 10))
+
+```
+
+
+## rangethres
+
+Earliest 10 days rainfall > x, subsequent 7 days rainfall > y
+
+```{r}
+
+precip <- persiann$precip_1
+
+rangethres_onset <- function(precip_df, point, before_range, after_range, before_thres, after_thres) {
+  precip <- precip_df[,point]
+  
+  # get all the possible before_starts
+  total_range_dates <- before_range + after_range
+  possible_before_starts = seq(1, 365 - total_range_dates, 1)
+  
+  # save sums in data frame
+  precip_sums <- data.frame(
+    before_start = numeric(length(possible_before_starts)),
+    before_sum = numeric(length(possible_before_starts)),
+    after_sum = numeric(length(possible_before_starts))
+  )
+  
+  index = 1
+  
+  # calculate all possible sums
+  for (before_start in possible_before_starts) {
+    before_precips <- precip_df[precip_df$DOY_Aug1 >= before_start & 
+                                 precip_df$DOY_Aug1 < before_start + before_range, point]
+    before_sum <- sum(before_precips)
+    
+    after_precips <- precip_df[precip_df$DOY_Aug1 >= before_start + before_range & 
+                                 precip_df$DOY_Aug1 < before_start + before_range + after_range, point]
+    after_sum <- sum(after_precips)
+    
+    precip_sums[index, "before_start"] <- before_start
+    precip_sums[index, "before_sum"] <- before_sum
+    precip_sums[index, "after_sum"] <- after_sum
+    
+    index = index + 1
+  }
+  
+  # filter sums for qualifying wet season days
+  wet_days <- precip_sums[precip_sums$before_sum >= before_thres & precip_sums$after_sum >= after_thres, "before_start"]
+  
+  if (length(wet_days) == 0) {onset <- 364}
+  else {onset <- min(wet_days) + before_range}
+
+  return(onset)
+}
+
+print(rangethres_onset(precip_df = persiann, point = 'precip_1', 
+                       before_range = 10, after_range = 7, before_thres = 500, after_thres = 4))
+print(rangethres_onset(precip_df = persiann, point = 'precip_2', 
+                       before_range = 10, after_range = 7, before_thres = 500, after_thres = 4))
+print(rangethres_onset(precip_df = persiann, point = 'precip_3', 
+                       before_range = 10, after_range = 7, before_thres = 500, after_thres = 4))
+
+print(rangethres_onset(precip_df = chirps, point = 'precip_1', 
+                       before_range = 10, after_range = 7, before_thres = 5, after_thres = 4))
+print(rangethres_onset(precip_df = chirps, point = 'precip_2', 
+                       before_range = 10, after_range = 7, before_thres = 5, after_thres = 4))
+print(rangethres_onset(precip_df = chirps, point = 'precip_3', 
+                       before_range = 10, after_range = 7, before_thres = 5, after_thres = 4))
+```
+
+## pentad
+
