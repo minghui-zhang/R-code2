@@ -7,13 +7,20 @@ output: html_document
 
 # import and clean data
 
+point 1: [-55.75269431542711,-12.791986265127166]
+point 2: [-52.76441306542711,-12.577622747101971]
+point 3: [-54.74195212792711,-15.645787864588819]
+
 ```{r}
+
+library(ggplot2)
+
 persiann_pt1 <- read.csv('E:/R-code2/Onset/data/persiann_pt1_precip.csv')
 persiann_pt2 <- read.csv('E:/R-code2/Onset/data/persiann_pt2_precip.csv')
-persiann_pt3 <- read.csv('E:/R-code2/Onset/data/persiann_pt2_precip.csv')
+persiann_pt3 <- read.csv('E:/R-code2/Onset/data/persiann_pt3_precip.csv')
 chirps_pt1 <- read.csv('E:/R-code2/Onset/data/chirps_pt1_precip.csv')
 chirps_pt2 <- read.csv('E:/R-code2/Onset/data/chirps_pt2_precip.csv')
-chirps_pt3 <- read.csv('E:/R-code2/Onset/data/chirps_pt2_precip.csv')
+chirps_pt3 <- read.csv('E:/R-code2/Onset/data/chirps_pt3_precip.csv')
 
 persiann <- data.frame(date = persiann_pt1$date,
                        precip_1 = persiann_pt1$precip,
@@ -29,7 +36,27 @@ chirps <- data.frame(date = chirps_pt1$date,
 persiann$DOY_Aug1 <- seq(0, 363)
 chirps$DOY_Aug1 <- seq(0, 363)
 
+ggplot(persiann) +
+  geom_line(aes(x = DOY_Aug1, y = precip_1), col = "black") +
+  geom_line(aes(x = DOY_Aug1, y = precip_2), col = "blue") +
+  geom_line(aes(x = DOY_Aug1, y = precip_3), col = "red") +
+  ggtitle("PERSIANN") +
+  ylim(c(0, 50)) +
+  theme_bw()
+
+ggplot(chirps) +
+  geom_line(aes(x = DOY_Aug1, y = precip_1), col = "black") +
+  geom_line(aes(x = DOY_Aug1, y = precip_2), col = "blue") +
+  geom_line(aes(x = DOY_Aug1, y = precip_3), col = "red") +
+  ggtitle("CHIRPS") +
+  ylim(c(0, 50)) +
+  theme_bw()
 ```
+
+# Gabriel's 2014 onset
+pt1: 60
+pt2: 61
+pt3: 60
 
 ## AA
 
@@ -50,13 +77,15 @@ thres_onset <- function(precip_df, point, thres) {
   return(onset)
 }
 
-print(thres_onset(precip_df = persiann, point = 'precip_1', thres = 1000))
-print(thres_onset(precip_df = persiann, point = 'precip_2', thres = 10))
-print(thres_onset(precip_df = persiann, point = 'precip_3', thres = 10))
+chosen_thres = 20
 
-print(thres_onset(precip_df = chirps, point = 'precip_1', thres = 10))
-print(thres_onset(precip_df = chirps, point = 'precip_2', thres = 10))
-print(thres_onset(precip_df = chirps, point = 'precip_3', thres = 10))
+# print(thres_onset(precip_df = persiann, point = 'precip_1', thres = chosen_thres))
+# print(thres_onset(precip_df = persiann, point = 'precip_2', thres = chosen_thres))
+# print(thres_onset(precip_df = persiann, point = 'precip_3', thres = chosen_thres))
+# 
+# print(thres_onset(precip_df = chirps, point = 'precip_1', thres = chosen_thres))
+# print(thres_onset(precip_df = chirps, point = 'precip_2', thres = chosen_thres))
+print(thres_onset(precip_df = chirps, point = 'precip_3', thres = chosen_thres))
 
 ```
 
@@ -64,6 +93,7 @@ print(thres_onset(precip_df = chirps, point = 'precip_3', thres = 10))
 ## rangethres
 
 Earliest 10 days rainfall > x, subsequent 7 days rainfall > y
+Onset happens at the END of the first range (before_range)
 
 ```{r}
 
@@ -111,20 +141,209 @@ rangethres_onset <- function(precip_df, point, before_range, after_range, before
   return(onset)
 }
 
-print(rangethres_onset(precip_df = persiann, point = 'precip_1', 
-                       before_range = 10, after_range = 7, before_thres = 500, after_thres = 4))
-print(rangethres_onset(precip_df = persiann, point = 'precip_2', 
-                       before_range = 10, after_range = 7, before_thres = 500, after_thres = 4))
-print(rangethres_onset(precip_df = persiann, point = 'precip_3', 
-                       before_range = 10, after_range = 7, before_thres = 500, after_thres = 4))
+chosen_before_thres = 7
+chosen_after_thres = 3
 
-print(rangethres_onset(precip_df = chirps, point = 'precip_1', 
-                       before_range = 10, after_range = 7, before_thres = 5, after_thres = 4))
-print(rangethres_onset(precip_df = chirps, point = 'precip_2', 
-                       before_range = 10, after_range = 7, before_thres = 5, after_thres = 4))
-print(rangethres_onset(precip_df = chirps, point = 'precip_3', 
-                       before_range = 10, after_range = 7, before_thres = 5, after_thres = 4))
+print(rangethres_onset(precip_df = persiann, point = 'precip_1',
+                       before_range = 10, after_range = 15,
+                       before_thres = chosen_before_thres, after_thres = chosen_after_thres))
+print(rangethres_onset(precip_df = persiann, point = 'precip_2',
+                       before_range = 10, after_range = 15,
+                       before_thres = chosen_before_thres, after_thres = chosen_after_thres))
+print(rangethres_onset(precip_df = persiann, point = 'precip_3',
+                       before_range = 10, after_range = 15,
+                       before_thres = chosen_before_thres, after_thres = chosen_after_thres))
+
+# print(rangethres_onset(precip_df = chirps, point = 'precip_1', 
+#                        before_range = 10, after_range = 7, 
+#                        before_thres = chosen_before_thres, after_thres = chosen_after_thres))
+# print(rangethres_onset(precip_df = chirps, point = 'precip_2', 
+#                        before_range = 10, after_range = 7, 
+#                        before_thres = chosen_before_thres, after_thres = chosen_after_thres))
+# print(rangethres_onset(precip_df = chirps, point = 'precip_3', 
+#                        before_range = 10, after_range = 7, 
+#                        before_thres = chosen_before_thres, after_thres = chosen_after_thres))
 ```
 
 ## pentad
 
+Earliest pentad > x total rain, with earlier/later pentads of less/more rain
+
+```{r}
+
+pentad_onset <- function(precip_df, point, thres) {
+
+  # get all the possible middle pentad starts
+  # first possible middle pentad starts 5 days after start of year
+  # last possible middle pentad starts 10 days before end of the year
+  possible_midpent_starts <- seq(5, 354, 1) 
+    
+  # save sums in data frame
+  precip_sums <- data.frame(
+    middle_pentad_start = numeric(length(possible_midpent_starts)),
+    first_pentad_sum = numeric(length(possible_midpent_starts)),
+    middle_pentad_sum = numeric(length(possible_midpent_starts)),
+    last_pentad_sum = numeric(length(possible_midpent_starts))
+  )
+    
+  index = 1
+    
+    # calculate all possible sums
+  for (midpent_start in possible_midpent_starts) {
+      first_pentad_precips <- precip_df[precip_df$DOY_Aug1 >= midpent_start - 5 & 
+                                   precip_df$DOY_Aug1 < midpent_start, point]
+      first_pentad_sum <- sum(first_pentad_precips)
+      
+      middle_pentad_precips <- precip_df[precip_df$DOY_Aug1 >= midpent_start & 
+                                   precip_df$DOY_Aug1 < midpent_start + 5, point]
+      middle_pentad_sum <- sum(middle_pentad_precips)
+      
+      last_pentad_precips <- precip_df[precip_df$DOY_Aug1 >= midpent_start + 5 & 
+                                   precip_df$DOY_Aug1 < midpent_start + 10, point]
+      last_pentad_sum <- sum(last_pentad_precips)
+      
+      precip_sums[index, "middle_pentad_start"] <- midpent_start
+      precip_sums[index, "first_pentad_sum"] <- first_pentad_sum
+      precip_sums[index, "middle_pentad_sum"] <- middle_pentad_sum
+      precip_sums[index, "last_pentad_sum"] <- last_pentad_sum
+      
+      index = index + 1
+    }
+    
+  # filter sums for qualifying wet season days
+  
+  # first check for pentads > thres
+  wet_days <- precip_sums[precip_sums$middle_pentad_sum >= thres & 
+                            precip_sums$first_pentad_sum < precip_sums$middle_pentad_sum &
+                            precip_sums$last_pentad_sum > precip_sums$middle_pentad_sum, "middle_pentad_start"]
+    
+  if (length(wet_days) == 0) {onset <- 364
+  } else {onset <- min(wet_days)}
+}
+
+chosen_thres = 4
+print(pentad_onset(precip_df = persiann, point = "precip_1", thres = chosen_thres))
+print(pentad_onset(precip_df = persiann, point = "precip_2", thres = chosen_thres))
+print(pentad_onset(precip_df = persiann, point = "precip_3", thres = chosen_thres))
+# 
+# print(pentad_onset(precip_df = chirps, point = "precip_1", thres = chosen_thres))
+# print(pentad_onset(precip_df = chirps, point = "precip_2", thres = chosen_thres))
+# print(pentad_onset(precip_df = chirps, point = "precip_3", thres = chosen_thres))
+
+```
+
+## Frequency
+
+Onset starts when number of rainy days (rain > 1 mm) in 4 week period is more than x days
+Onset is at the END of this 4 week period
+
+```{r}
+precip <- persiann$precip_1
+precip_df <- persiann
+point <- "precip_1"
+num_days <- 3
+
+freq_onset <- function(precip_df, point, num_days) {
+  # get rainy days as boolean
+  rainy_day <- precip_df[, point] >= 1
+  
+  possible_starts <- seq(1, 365 - 29)
+  
+  precip_counts = data.frame(
+    start = numeric(length(possible_starts)),
+    count = numeric(length(possible_starts))
+  )
+  
+  index = 1
+  for (start in possible_starts) {
+    count <- sum(rainy_day[start:(start+28)])
+    
+    precip_counts[index, "start"] <- start
+    precip_counts[index, "count"] <- count
+    
+    index = index + 1
+  }
+  
+  wet_days <- precip_counts[precip_counts$count >= num_days, "start"]
+  
+  if (length(wet_days) == 0) {onset <- 364
+  } else { onset <- min(wet_days) + 28 } # get the END of the four weeks as onset
+  
+  return(onset)
+}
+
+chosen_num_days = 5
+
+# print(freq_onset(precip_df = persiann, point = "precip_1", num_days = chosen_num_days))
+# print(freq_onset(precip_df = persiann, point = "precip_2", num_days = chosen_num_days))
+# print(freq_onset(precip_df = persiann, point = "precip_3", num_days = chosen_num_days))
+# 
+# print(freq_onset(precip_df = chirps, point = "precip_1", num_days = chosen_num_days))
+# print(freq_onset(precip_df = chirps, point = "precip_2", num_days = chosen_num_days))
+print(freq_onset(precip_df = chirps, point = "precip_3", num_days = chosen_num_days))
+
+```
+
+## monsoon
+
+Onset is the first wet day (> 1 mm, or wet_day_thres) that's followed by 10 days of rain >= 10 mm (or wet_days_thres)
+
+```{r}
+
+precip <- persiann$precip_1
+precip_df <- persiann
+point <- "precip_1"
+wet_day_thres <- 1
+wet_days_thres <- 10
+
+monsoon_onset <- function(precip_df, point, wet_day_thres, wet_days_thres) {
+  
+  # get rainy days as boolean
+  rainy_day <- precip_df[, point] >= wet_day_thres
+  
+  # the possible onsets are all the rainy_days that occur before DOY = 364 - wet_days_thres
+  possible_starts <- precip_df[rainy_day, "DOY_Aug1"]
+  possible_starts <- possible_starts[which(possible_starts < (364 - wet_days_thres))]
+  
+  precip_sums = data.frame(
+      start = numeric(length(possible_starts)),
+      sum = numeric(length(possible_starts))
+    )
+  
+  index = 1
+    for (start in possible_starts) {
+      next_days_precip <- precip_df[start:(start+10), point]
+      next_days_sum <- sum(next_days_precip)
+      
+      precip_sums[index, "start"] <- start
+      precip_sums[index, "sum"] <- next_days_sum
+      
+      index = index + 1
+    }
+  
+  
+  wet_days <- precip_sums[precip_sums$sum >= wet_days_thres, "start"]
+  
+  if (length(wet_days) == 0) {onset <- 364
+  } else { onset <- min(wet_days) }
+  
+  return(onset)
+}
+
+chosen_wet_day_thres = 1
+chosen_wet_days_thres = 100
+
+print(monsoon_onset(precip_df = persiann, point = "precip_1",
+                    wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
+print(monsoon_onset(precip_df = persiann, point = "precip_2",
+                    wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
+print(monsoon_onset(precip_df = persiann, point = "precip_3",
+                    wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
+
+print(monsoon_onset(precip_df = chirps, point = "precip_1",
+                    wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
+print(monsoon_onset(precip_df = chirps, point = "precip_2",
+                    wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
+print(monsoon_onset(precip_df = chirps, point = "precip_3", 
+                    wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
+```
