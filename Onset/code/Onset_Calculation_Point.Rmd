@@ -221,7 +221,7 @@ pentad_onset <- function(precip_df, point, thres) {
   } else {onset <- min(wet_days)}
 }
 
-chosen_thres = 4
+chosen_thres = 10
 print(pentad_onset(precip_df = persiann, point = "precip_1", thres = chosen_thres))
 print(pentad_onset(precip_df = persiann, point = "precip_2", thres = chosen_thres))
 print(pentad_onset(precip_df = persiann, point = "precip_3", thres = chosen_thres))
@@ -272,15 +272,15 @@ freq_onset <- function(precip_df, point, num_days) {
   return(onset)
 }
 
-chosen_num_days = 5
+chosen_num_days = 10
 
-# print(freq_onset(precip_df = persiann, point = "precip_1", num_days = chosen_num_days))
-# print(freq_onset(precip_df = persiann, point = "precip_2", num_days = chosen_num_days))
-# print(freq_onset(precip_df = persiann, point = "precip_3", num_days = chosen_num_days))
+print(freq_onset(precip_df = persiann, point = "precip_1", num_days = chosen_num_days))
+print(freq_onset(precip_df = persiann, point = "precip_2", num_days = chosen_num_days))
+print(freq_onset(precip_df = persiann, point = "precip_3", num_days = chosen_num_days))
 # 
 # print(freq_onset(precip_df = chirps, point = "precip_1", num_days = chosen_num_days))
 # print(freq_onset(precip_df = chirps, point = "precip_2", num_days = chosen_num_days))
-print(freq_onset(precip_df = chirps, point = "precip_3", num_days = chosen_num_days))
+# print(freq_onset(precip_df = chirps, point = "precip_3", num_days = chosen_num_days))
 
 ```
 
@@ -331,7 +331,7 @@ monsoon_onset <- function(precip_df, point, wet_day_thres, wet_days_thres) {
 }
 
 chosen_wet_day_thres = 1
-chosen_wet_days_thres = 100
+chosen_wet_days_thres = 10
 
 print(monsoon_onset(precip_df = persiann, point = "precip_1",
                     wet_day_thres = chosen_wet_day_thres, wet_days_thres = chosen_wet_days_thres))
