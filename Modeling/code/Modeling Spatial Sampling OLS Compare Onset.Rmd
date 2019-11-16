@@ -37,7 +37,7 @@ source('E:/R-code2/Modeling/code/FCN_plotting.R')
 source('E:/R-code2/Modeling/code/FCN_sample_data.R')
 source('E:/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R')
 
-onset_type <- 'freq_10_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+onset_type <- 'rangethres_10_15_15_40_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
 
 if (onset_type != 'Gabriel_onset') {
   filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
@@ -252,6 +252,10 @@ bias_measure <- error_model$coefficients['observed']
 
 plot(error_df$observed, error_df$residual)
 plot(sampled$onset, error_df$residual)
+plot(sampled$year, error_df$residual)
+plot(sampled$lat, error_df$residual)
+plot(sampled$lon, error_df$residual)
+
 
 print(onset_type)
 print('onset coef')
