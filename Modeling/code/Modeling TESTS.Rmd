@@ -1,0 +1,304 @@
+---
+title: "Test models for prediction bias"
+output: html_document
+---
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics) # for rmse
+library(leaflet)
+library(leaps) # stepwise model selection
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code2/Modeling/code/FCN_clean_csvs.R')
+source('E:/R-code2/Modeling/code/FCN_plotting.R')
+source('E:/R-code2/Modeling/code/FCN_sample_data.R')
+source('E:/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R')
+
+onset_type <- 'freq_8_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+
+if (onset_type != 'Gabriel_onset') {
+  filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+  filename_percentile5 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
+  filename_percentile25 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile25_onset_cell_', onset_type, '.csv')
+
+  filename_shp<- paste0('E:/R-code-large-files/data_onset_', onset_type, '/shp')
+  layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
+  
+  median_cell_raw <- read.csv(filename_median)
+  percentile5_cell_raw <- read.csv(filename_percentile5)
+  percentile25_cell_raw <- read.csv(filename_percentile25)
+  
+  cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+}
+
+if (onset_type == 'Gabriel_onset') {
+  median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v3.csv')
+  percentile5_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_onset_cell_v3.csv')
+  percentile25_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile25_onset_cell_v3.csv')
+  
+  cell_sf <- st_read(dsn = 'E:/R-code2/Modeling/data/shp/median_onset_cell_v3', layer = 'median_onset_cell_SHP_v3')
+}
+
+
+MT_outline <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+grid_1deg <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+# read in all the onsets. only the csv, not shp
+all_onset_types <- c('Gabriel_onset', 'AA_2_persiann', 'AA_3_persiann', 
+                      'AA_25_persiann', 'AA_25_chirps_ATgabriel25km', 'AA_25_persiann_ATgabriel25km',
+                     'freq_5_persiann', 'freq_8_persiann', 'freq_10_persiann', 'freq_12_persiann',
+                     'monsoon_30_persiann', 'monsoon_40_persiann',
+                     'pentad_8_persiann', 'pentad_10_persiann', 'pentad_15_persiann',
+                     'rangethres_10_15_15_30_persiann', 'rangethres_10_15_15_40_persiann',
+                     'rangethres_10_15_20_20_persiann', 'rangethres_10_15_20_30_persiann',
+                     'rangethres_10_15_30_40_persiann', 'thres_10_persiann')
+# didn't do:  'AA_25_chirps_ATchirps5km'
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+
+
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+
+cell_sf_percentile25 <- cell_sf
+cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+
+# split into SC and DC cells
+cell_sf_tidy_SC <- cell_sf_tidy[cell_sf_tidy$intensity == "SC",]
+cell_sf_tidy_DC <- cell_sf_tidy[cell_sf_tidy$intensity == "DC",]
+  
+```
+
+
+
+
+## evaluate different sampling strategies and predictors
+
+```{r}
+
+# test different grid sizes and aggregation strategies. don't do any offset
+
+grid_size = 0.75
+agg_scheme = FALSE
+plant_stat_type = "percentile25"
+
+
+# run the SAME OLS again, this time to save the prediction error. then, model prediction error against observed value to get slope (indicator of bias)
+
+sampled <- get_sampled_data(full_data = cell_sf_tidy, plant_stat = plant_stat_type, grid_size = 0.75,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+# sample from full data and turn into data frame
+sampled_SC <- get_sampled_data(full_data = cell_sf_tidy_SC, plant_stat = plant_stat_type, grid_size = 0.75,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+st_geometry(sampled_SC) <- NULL
+
+sampled_DC <- get_sampled_data(full_data = cell_sf_tidy_DC, plant_stat = plant_stat_type, grid_size = 0.75,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+st_geometry(sampled_DC) <- NULL
+
+
+plant_model <- lm(plant ~ onset + lat + lon + intensity + region + year, data = sampled)
+plant_model_DC <- lm(plant ~ onset, data = sampled_DC)
+plant_model_SC <- lm(plant ~ onset, data = sampled_SC)
+
+# save residual and observed
+error_df <- data.frame(residual = plant_model$residuals, observed = sampled$plant)
+error_df_DC <- data.frame(residual = plant_model_DC$residuals, observed = sampled_DC$plant)
+error_df_SC <- data.frame(residual = plant_model_SC$residuals, observed = sampled_SC$plant)
+
+# model residual vs observed, look at slope as measure of bias
+error_model <- lm(residual ~ observed, data = error_df)
+bias_measure <- error_model$coefficients['observed']
+
+error_model_DC <- lm(residual ~ observed, data = error_df_DC)
+bias_measure_DC <- error_model_DC$coefficients['observed']
+
+error_model_SC <- lm(residual ~ observed, data = error_df_SC)
+bias_measure_SC <- error_model_SC$coefficients['observed']
+
+plot(error_df_DC$observed, error_df_DC$residual)
+plot(sampled_DC$onset, error_df_DC$residual)
+plot(sampled_DC$year, error_df_DC$residual)
+plot(sampled_DC$lat, error_df_DC$residual)
+plot(sampled_DC$lon, error_df_DC$residual)
+plot(sampled_DC$plant, stats::predict(plant_model_DC, sampled_DC), main = 'DC, obs vs pred')
+abline(a = 0, b = 1)
+
+plot(error_df_SC$observed, error_df_SC$residual)
+plot(sampled_SC$onset, error_df_SC$residual)
+plot(sampled_SC$year, error_df_SC$residual)
+plot(sampled_SC$lat, error_df_SC$residual)
+plot(sampled_SC$lon, error_df_SC$residual)
+plot(sampled_SC$plant, stats::predict(plant_model_SC, sampled_SC), main = 'SC, obs vs pred')
+abline(a = 0, b = 1)
+
+# plot(error_df$observed, error_df$residual)
+# plot(sampled$onset, error_df$residual)
+# plot(sampled$year, error_df$residual)
+# plot(sampled$lat, error_df$residual)
+# plot(sampled$lon, error_df$residual)
+plot(sampled$plant, stats::predict(plant_model, sampled), main = 'all soy, obs vs pred')
+abline(a = 0, b = 1)
+
+print(onset_type)
+
+print(summary(plant_model_DC))
+print(summary(plant_model_SC))
+
+print('bias measure, DC')
+print(bias_measure_DC)
+print('bias measure, SC')
+print(bias_measure_SC)
+
+# print(summary(plant_model))
+# print('bias measure')
+# print(bias_measure)
+
+```
+
+## Tests
+
+```{r}
+
+# does prediction bias get higher when we take out a predictor known to be important?
+
+sampled <- get_sampled_data(full_data = cell_sf_tidy, plant_stat = plant_stat_type, grid_size = 0.75,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+plant_model <- lm(plant ~ onset , data = sampled)
+
+# save residual and observed
+error_df <- data.frame(residual = plant_model$residuals,
+                       observed = sampled$plant)
+
+# model residual vs observed, look at slope as measure of bias
+error_model <- lm(residual ~ observed, data = error_df)
+bias_measure <- error_model$coefficients['observed']
+
+plot(error_df$observed, error_df$residual)
+plot(sampled$onset, error_df$residual)
+plot(sampled$year, error_df$residual)
+plot(sampled$lat, error_df$residual)
+plot(sampled$lon, error_df$residual)
+
+
+print(onset_type)
+print(summary(plant_model))
+print('bias measure')
+print(bias_measure)
+
+summary(plant_model)
+```
+
+
+
+```{r}
+
+# use 10x of estimated onset coeff and predict (test hypothesis that onset coefficient isn't large enough because a lot of its variation comes from year)
+
+intercept <- summary(plant_model)$coefficients['(Intercept)', 'Estimate']
+onset <- summary(plant_model)$coefficients['onset', 'Estimate']
+lat <- summary(plant_model)$coefficients['lat', 'Estimate']
+lon <- summary(plant_model)$coefficients['lon', 'Estimate']
+intensitySC <- summary(plant_model)$coefficients['intensitySC', 'Estimate']
+regioneast <- summary(plant_model)$coefficients['regioneast', 'Estimate']
+regionsouth <- summary(plant_model)$coefficients['regionsouth', 'Estimate']
+regionwest <- summary(plant_model)$coefficients['regionwest', 'Estimate']
+year <- summary(plant_model)$coefficients['year', 'Estimate']
+
+# get categorical predictors ready
+untidy_sampled <- spread(sampled, intensity, intensity) # get categorical data into dummy columns
+untidy_sampled <- spread(untidy_sampled, region, region)
+
+untidy_sampled$west[untidy_sampled$west == 'west'] <- 1 # turn categorical data into 0 or 1
+untidy_sampled$east[untidy_sampled$east == 'east'] <- 1
+untidy_sampled$south[untidy_sampled$south == 'south'] <- 1
+untidy_sampled$DC[untidy_sampled$DC == 'DC'] <- 1
+untidy_sampled$SC[untidy_sampled$SC == 'SC'] <- 1
+
+untidy_sampled[is.na(untidy_sampled)] <- 0
+
+untidy_sampled[, c('west', 'east', 'south', 'DC', 'SC')] <- sapply(untidy_sampled[, c('west', 'east', 'south', 'DC', 'SC')], as.numeric)
+
+prediction <- intercept + onset*untidy_sampled$onset + lat*untidy_sampled$lat + lon*untidy_sampled$lon + intensitySC*untidy_sampled$SC + regioneast*untidy_sampled$east + regionsouth*untidy_sampled$south + regionwest*untidy_sampled$west + year*untidy_sampled$year
+
+# save residual and observed
+error_df <- data.frame(residual = untidy_sampled$plant - prediction,
+                       observed = untidy_sampled$plant)
+
+# model residual vs observed, look at slope as measure of bias
+error_model <- lm(residual ~ observed, data = error_df)
+bias_measure <- error_model$coefficients['observed']
+
+plot(error_df$observed, error_df$residual)
+print('bias measure')
+print(bias_measure)
+
+plot(prediction, untidy_sampled$plant)
+abline(a = 0, b = 1)
+
+```
+

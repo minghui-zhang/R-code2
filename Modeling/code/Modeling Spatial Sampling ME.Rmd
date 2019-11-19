@@ -35,23 +35,49 @@ source('E:/R-code2/Modeling/code/FCN_sample_data.R')
 source('E:/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R') # OLS only
 source('E:/R-code2/Modeling/code/FCN_run_any_model_spatial_sampled.R') # OLS, FE, RE and ME
 
+onset_type <- 'freq_8_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+
+if (onset_type != 'Gabriel_onset') {
+  filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+  filename_percentile5 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
+  filename_percentile25 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile25_onset_cell_', onset_type, '.csv')
+
+  filename_shp<- paste0('E:/R-code-large-files/data_onset_', onset_type, '/shp')
+  layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
+  
+  median_cell_raw <- read.csv(filename_median)
+  percentile5_cell_raw <- read.csv(filename_percentile5)
+  percentile25_cell_raw <- read.csv(filename_percentile25)
+  
+  cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+}
+
+if (onset_type == 'Gabriel_onset') {
+  median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v3.csv')
+  percentile5_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_onset_cell_v3.csv')
+  percentile25_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile25_onset_cell_v3.csv')
+  
+  cell_sf <- st_read(dsn = 'E:/R-code2/Modeling/data/shp/median_onset_cell_v3', layer = 'median_onset_cell_SHP_v3')
+}
+
+
 MT_outline <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-
-onset_type <- 'Gabriel_onset'
-
-median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v2.csv')
-percentile5_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_onset_cell_v2.csv')
-percentile95_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_onset_cell_v2.csv')
 
 grid_1deg <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
 munis <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/munis', layer = 'munis_SHP')
 crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
-  
-cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
 
-min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
-
+# read in all the onsets. only the csv, not shp
+all_onset_types <- c('Gabriel_onset', 'AA_2_persiann', 'AA_3_persiann', 
+                      'AA_25_persiann', 'AA_25_chirps_ATgabriel25km', 'AA_25_persiann_ATgabriel25km',
+                     'freq_5_persiann', 'freq_8_persiann', 'freq_10_persiann', 'freq_12_persiann',
+                     'monsoon_30_persiann', 'monsoon_40_persiann',
+                     'pentad_8_persiann', 'pentad_10_persiann', 'pentad_15_persiann',
+                     'rangethres_10_15_15_30_persiann', 'rangethres_10_15_15_40_persiann',
+                     'rangethres_10_15_20_20_persiann', 'rangethres_10_15_20_30_persiann',
+                     'rangethres_10_15_30_40_persiann', 'thres_10_persiann')
+# didn't do:  'AA_25_chirps_ATchirps5km'
 ```
 
 ## read and clean spatial data
@@ -68,7 +94,7 @@ median_cell$plant_stat_type <- rep('median', nrow(median_cell))
 
 # percentiles
 percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
-percentile95_cell <- percentile95_cell_raw %>% rename_cols_percentile_cell()
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
 
 # SF DATA ------------------------------------------------------------------------------------------------
 
@@ -86,12 +112,12 @@ cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
 cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
 cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
 
-cell_sf_percentile95 <- cell_sf
-cell_sf_percentile95$SC_plant <- percentile95_cell$SC_plant
-cell_sf_percentile95$DC_plant <- percentile95_cell$DC_plant
-cell_sf_percentile95$plant_stat_type <- rep("percentile95", nrow(cell_sf_percentile95))
+cell_sf_percentile25 <- cell_sf
+cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
 
-cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile95)
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
 
 cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
             #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
@@ -150,7 +176,7 @@ print(fe_results)
 
 ```{r}
 
-plant_stat_types <- c("median", "percentile5", "percentile95")
+plant_stat_types <- c("median", "percentile5", "percentile25")
 
 # set up data frame to store model results for all models
 ols_results <- data.frame(plant_stat_type = numeric(0),
@@ -207,6 +233,118 @@ print(ols_results)
 
 ```
 
+## FE and prediction bias
+
+```{r}
+
+library(plm) # for FE and FE
+
+plant_stat_type = 'percentile25'
+chosen_grid_size = 0.75
+
+# sample from full data and turn into data frame
+sampled_SC <- get_sampled_data(full_data = cell_sf_tidy_SC, plant_stat = plant_stat_type, grid_size = chosen_grid_size,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+st_geometry(sampled_SC) <- NULL
+
+sampled_DC <- get_sampled_data(full_data = cell_sf_tidy_DC, plant_stat = plant_stat_type, grid_size = chosen_grid_size,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+st_geometry(sampled_DC) <- NULL
+
+# for plm, first set data as panel data
+panel_SC <- pdata.frame(sampled_SC,index = c("cell_ID"))
+panel_DC <- pdata.frame(sampled_DC,index = c("cell_ID"))
+
+# FE
+fe_result_SC <- plm(plant ~ onset + year_index, data = panel_SC, model = "within")
+fe_result_DC <- plm(plant ~ onset + year_index, data = panel_DC, model = "within")
+
+#
+print(summary(fe_result_SC))
+print(summary(fe_result_DC))
+
+# save residual and observed
+error_df_DC <- data.frame(residual = fe_result_DC$residuals,
+                       observed = sampled_DC$plant)
+error_df_SC <- data.frame(residual = fe_result_SC$residuals,
+                       observed = sampled_SC$plant)
+
+# model residual vs observed, look at slope as measure of bias
+error_model_DC <- lm(residual ~ observed, data = error_df_DC)
+bias_measure_DC <- error_model_DC$coefficients['observed']
+
+error_model_SC <- lm(residual ~ observed, data = error_df_SC)
+bias_measure_SC <- error_model_SC$coefficients['observed']
+
+plot(error_df_DC$observed, error_df_DC$residual, main = 'DC')
+plot(error_df_SC$observed, error_df_SC$residual, main = 'SC')
+
+plot(sampled_DC$onset, error_df_DC$residual, main = 'DC')
+plot(sampled_SC$onset, error_df_SC$residual, main = 'SC')
+
+plot(sampled_DC$year, error_df_DC$residual, main = 'DC')
+plot(sampled_SC$year, error_df_SC$residual, main = 'SC')
+
+plot(sampled_DC$plant, sampled_DC$plant - error_df_DC$residual, main = 'DC, obs vs pred')
+abline(a = 0, b = 1)
+plot(sampled_SC$plant, sampled_SC$plant - error_df_SC$residual, main = 'SC, obs vs pred')
+abline(a = 0, b = 1)
+
+plot(sampled_DC$plant - mean(sampled_DC$plant), pmodel.response(fe_result_DC, sampled_DC), main = 'DC, obs vs pred')
+abline(a = 0, b = 1)
+plot(sampled_SC$plant - mean(sampled_SC$plant), pmodel.response(fe_result_SC, sampled_SC), main = 'SC, obs vs pred')
+abline(a = 0, b = 1)
+
+# extract fixed effects
+fe_SC_vector <- plm::fixef(fe_result_SC)
+fe_DC_vector <- plm::fixef(fe_result_DC)
+# define dataframe for joining
+fe_SC <- data.frame(cell_ID = names(fe_SC_vector),
+                    fe = fe_SC_vector)
+fe_DC <- data.frame(cell_ID = names(fe_DC_vector),
+                    fe = fe_DC_vector)
+
+# resample, keeping geometry info
+sampled_SC <- get_sampled_data(full_data = cell_sf_tidy_SC, plant_stat = plant_stat_type, grid_size = chosen_grid_size,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+sampled_DC <- get_sampled_data(full_data = cell_sf_tidy_DC, plant_stat = plant_stat_type, grid_size = chosen_grid_size,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+
+# join
+sampled_SC <- merge(sampled_SC, fe_SC, by = "cell_ID")
+sampled_DC <- merge(sampled_DC, fe_DC, by = "cell_ID")
+
+# plot fe
+year <- 2014 # all years will be the same for fixed effects
+sampled_SC_year <- sampled_SC[sampled_SC$year == year, ]
+sampled_DC_year <- sampled_DC[sampled_DC$year == year, ]
+
+fe_SC_map <- ggplot(sampled_SC_year) +
+  geom_sf(aes(fill = fe)) +
+  scale_fill_viridis() +
+  ggtitle("Fixed effects for SC") +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+fe_DC_map <- ggplot(sampled_DC_year) +
+  geom_sf(aes(fill = fe)) +
+  scale_fill_viridis() +
+  ggtitle("Fixed effects for DC") +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+print(fe_SC_map)
+print(fe_DC_map)
+
+print(onset_type)
+
+print('bias measure, DC')
+print(bias_measure_DC)
+print('bias measure, SC')
+print(bias_measure_SC)
+
+
+```
 
 ## FE model
 ```{r}
