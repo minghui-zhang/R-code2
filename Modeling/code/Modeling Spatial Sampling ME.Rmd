@@ -310,6 +310,9 @@ sampled_SC <- get_sampled_data(full_data = cell_sf_tidy_SC, plant_stat = plant_s
 sampled_DC <- get_sampled_data(full_data = cell_sf_tidy_DC, plant_stat = plant_stat_type, grid_size = chosen_grid_size,
                  lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
 
+# add residual
+sampled_DC$residuals <- fe_result_DC$residuals
+
 # join
 sampled_SC <- merge(sampled_SC, fe_SC, by = "cell_ID")
 sampled_DC <- merge(sampled_DC, fe_DC, by = "cell_ID")
@@ -336,6 +339,17 @@ fe_DC_map <- ggplot(sampled_DC_year) +
 print(fe_SC_map)
 print(fe_DC_map)
 
+# map residual in 2014
+
+resid_DC_map <- ggplot(sampled_DC_year) +
+  geom_sf(aes(fill = residuals), color = NA) +
+  scale_fill_viridis() +
+  ggtitle(paste("FE model, fit all cells, Residual for DC,", year)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+print(resid_DC_map)
+
 print(onset_type)
 
 print('bias measure, DC')
@@ -344,6 +358,121 @@ print('bias measure, SC')
 print(bias_measure_SC)
 
 
+```
+
+## model north and south separately, for ALL cells. Compare to modeling entire state at the same time for ALL cells
+
+```{r}
+
+# fit all cells, otherwise south won't have enough points
+library(plm) # for FE and FE
+
+plant_stat_type = 'percentile25'
+
+cell_sf_tidy_DC_north <- cell_sf_tidy[cell_sf_tidy$region != "south" & cell_sf_tidy$intensity == "DC",]
+cell_sf_tidy_DC_south <- cell_sf_tidy[cell_sf_tidy$region == "south" & cell_sf_tidy$intensity == "DC",]
+
+
+# sample from full data and turn into data frame
+sampled_DC_north <- cell_sf_tidy_DC_north[cell_sf_tidy_DC_north$plant_stat_type == plant_stat_type, ]
+st_geometry(sampled_DC_north) <- NULL
+sampled_DC_south <- cell_sf_tidy_DC_south[cell_sf_tidy_DC_south$plant_stat_type == plant_stat_type, ]
+st_geometry(sampled_DC_south) <- NULL
+
+# for plm, first set data as panel data
+panel_DC_north <- pdata.frame(sampled_DC_north,index = c("cell_ID"))
+panel_DC_south <- pdata.frame(sampled_DC_south,index = c("cell_ID"))
+
+# FE
+fe_result_DC_north <- plm(plant ~ onset + year_index, data = panel_DC_north, model = "within")
+fe_result_DC_south <- plm(plant ~ onset + year_index, data = panel_DC_south, model = "within")
+
+# sample again and keep geometry
+sampled_DC_north <- cell_sf_tidy_DC_north[cell_sf_tidy_DC_north$plant_stat_type == plant_stat_type, ]
+sampled_DC_south <- cell_sf_tidy_DC_south[cell_sf_tidy_DC_south$plant_stat_type == plant_stat_type, ]
+
+sampled_DC_north$residuals <- fe_result_DC_north$residuals
+sampled_DC_south$residuals <- fe_result_DC_south$residuals
+
+year <- 2014
+sampled_DC_north_year <- sampled_DC_north[sampled_DC_north$year == year, ]
+sampled_DC_south_year <- sampled_DC_south[sampled_DC_south$year == year, ]
+sampled_DC_northsouth_year <- rbind(sampled_DC_north_year, sampled_DC_south_year)
+
+resid_DC_northsouth_map <- ggplot(sampled_DC_northsouth_year) +
+  geom_sf(aes(fill = residuals), color = NA) +
+  scale_fill_viridis() +
+  ggtitle(paste("FE model, fit north south separately, Residual for DC,", year)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+resid_DC_north_map <- ggplot(sampled_DC_north_year) +
+  geom_sf(aes(fill = residuals), color = NA) +
+  scale_fill_viridis() +
+  ggtitle(paste("FE model, fit north only, Residual for DC,", year)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+resid_DC_south_map <- ggplot(sampled_DC_south_year) +
+  geom_sf(aes(fill = residuals), color = NA) +
+  scale_fill_viridis() +
+  ggtitle(paste("FE model, fit south only, Residual for DC,", year)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+print(resid_DC_north_map)
+print(resid_DC_south_map)
+print(resid_DC_northsouth_map)
+
+# compare to residual when training on all data
+
+cell_sf_tidy_DC <- cell_sf_tidy[cell_sf_tidy$intensity == "DC",]
+
+# sample from full data and turn into data frame
+sampled_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$plant_stat_type == plant_stat_type,]
+st_geometry(sampled_DC) <- NULL
+
+# for plm, first set data as panel data
+panel_DC <- pdata.frame(sampled_DC,index = c("cell_ID"))
+
+# FE
+fe_result_DC <- plm(plant ~ onset + year_index, data = panel_DC, model = "within")
+
+# sample again and keep geometry
+sampled_DC <- cell_sf_tidy_DC[cell_sf_tidy_DC$plant_stat_type == plant_stat_type,]
+
+sampled_DC$residuals <- fe_result_DC$residuals
+
+# extract fixed effects
+fe_DC_vector <- plm::fixef(fe_result_DC)
+# define dataframe for joining
+fe_DC <- data.frame(cell_ID = names(fe_DC_vector),
+                    fe = fe_DC_vector)
+
+sampled_DC <- merge(sampled_DC, fe_DC, by = "cell_ID")
+
+# plot fe
+year <- 2014 # all years will be the same for fixed effects
+
+sampled_DC_year <- sampled_DC[sampled_DC$year == year, ]
+
+
+fe_DC_map <- ggplot(sampled_DC_year) +
+  geom_sf(aes(fill = fe), color = NA) +
+  scale_fill_viridis() +
+  ggtitle("Fixed effects for DC") +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+resid_DC_map <- ggplot(sampled_DC_year) +
+  geom_sf(aes(fill = residuals), color = NA) +
+  scale_fill_viridis() +
+  ggtitle(paste("FE model, fit all cells, Residual for DC,", year)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+print(fe_DC_map)
+print(resid_DC_map)
 ```
 
 ## FE model
