@@ -85,13 +85,13 @@ ui <- navbarPage("Crop Timing", id = "nav",
                        "Harvest date" = "harvest")),
         
       radioButtons("user_intensity", "Cropping intensity:",
-                               c("Single Cropping" = "SC",
-                                 "Double Cropping" = "DC")),
+                               c("Single Cropping (SC)" = "SC",
+                                 "Double Cropping (DC)" = "DC")),
                   
-      #selectInput("user_year", "Year:", vars)
-      sliderInput(inputId = "user_year", 
+      #selectInput("user_year", "Year:", vars),
+      sliderInput(inputId = "user_year",
                     label = "Year",
-                    value = 2014, min = 2004, max = 2014, 
+                    value = 2014, min = 2004, max = 2014,
       	            step = 1, round = TRUE, sep = '', ticks = FALSE),
       
       h6("Click a cell to view its planting and wet season onset trajectory."),
@@ -210,10 +210,11 @@ server <- function(input, output) {
                              values = c("DC" = "darkgreen", "SC" = "green", "zonset" = "darkblue")) +
           scale_linetype_manual(name = "", labels = c("Harvest date", "Planting date"),
                                 values = c("dotdash", "solid")) +
-          scale_y_date(date_labels = "%m-%d") +
+          scale_y_date(date_labels = "%m-%d", date_breaks = "1 month") +
           labs(linetype = "") +
           ggtitle("Timeseries at chosen cell") +
-          theme_bw()
+          theme_bw() +
+          theme(text = element_text(size = 15))
         
       })
     }
@@ -227,10 +228,11 @@ server <- function(input, output) {
           scale_color_manual(name = "", 
                              labels = c("Harvest date", "Planting date"),
                              values = c("plant" = "darkgreen", "harvest" = "darkred")) +
-          scale_y_date(date_labels = "%m-%d") +
+          scale_y_date(date_labels = "%m-%d", date_breaks = "1 month") +
           labs(shape = "") +
           ggtitle("Invalid cell chosen. Showing timeseries at all cells") +
-          theme_bw()
+          theme_bw() +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -281,7 +283,8 @@ server <- function(input, output) {
           scale_fill_manual(values=c("red", "darkgreen")) +
           theme_bw() +
           labs(fill = "") +
-          ylim(0, 130)
+          ylim(0, 130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -305,7 +308,8 @@ server <- function(input, output) {
           theme_bw() +
           labs(fill = "") +
           scale_x_date(date_breaks="3 month", limits = as.Date(c(paste0(input$user_year - 1, '-08-01'),paste0(input$user_year, '-07-31')))) +
-          ylim(0, 130)
+          ylim(0, 130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -352,7 +356,8 @@ server <- function(input, output) {
           scale_fill_manual(values=c("red", "darkgreen")) +
           theme_bw() +
           labs(fill = "") +
-          ylim(0, 130)
+          ylim(0, 130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -368,7 +373,8 @@ server <- function(input, output) {
           theme_bw() +
           labs(fill = "") +
           scale_x_date(date_breaks="3 month", limits = as.Date(c(paste0(input$user_year - 1, '-08-01'),paste0(input$user_year, '-07-31')))) +
-          ylim(0,130)
+          ylim(0,130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -405,10 +411,11 @@ server <- function(input, output) {
                                                    values = c("DC" = "darkgreen", "SC" = "green", "zonset" = "darkblue")) +
                                 scale_linetype_manual(name = "", labels = c("Harvest date", "Planting date"),
                                                                   values = c("dotdash", "solid")) +
-                                scale_y_date(date_labels = "%m-%d") +
+                                scale_y_date(date_labels = "%m-%d", date_breaks = "1 month") +
                                 labs(linetype = "") +
                                 ggtitle("Timeseries at chosen cell") +
-                                theme_bw()
+                                theme_bw() +
+                                theme(text = element_text(size = 15))
       })
     }
 
@@ -421,10 +428,11 @@ server <- function(input, output) {
           scale_color_manual(name = "", 
                              labels = c("Harvest date", "Planting date"),
                              values = c("plant" = "darkgreen", "harvest" = "darkred")) +
-          scale_y_date(date_labels = "%m-%d") +
+          scale_y_date(date_labels = "%m-%d", date_breaks = "1 month") +
           labs(shape = "") +
           ggtitle("Invalid cell chosen. Showing timeseries at all cells") +
-          theme_bw()
+          theme_bw() +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -475,7 +483,8 @@ server <- function(input, output) {
           theme_bw() +
           labs(fill = "") +
           scale_x_date(date_breaks="3 month", limits = as.Date(c(paste0(input$user_year - 1, '-08-01'),paste0(input$user_year, '-07-31')))) +
-          ylim(0, 130)
+          ylim(0, 130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -493,7 +502,8 @@ server <- function(input, output) {
           theme_bw() +
           labs(fill = "") +
           scale_x_date(date_breaks="3 month", limits = as.Date(c(paste0(input$user_year - 1, '-08-01'),paste0(input$user_year, '-07-31')))) +
-          ylim(0, 130)
+          ylim(0, 130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -540,7 +550,8 @@ server <- function(input, output) {
           theme_bw() +
           labs(fill = "") +
           scale_x_date(date_breaks="3 month", limits = as.Date(c(paste0(input$user_year - 1, '-08-01'),paste0(input$user_year, '-07-31')))) +
-          ylim(0, 130)
+          ylim(0, 130) +
+          theme(text = element_text(size = 15))
       })
     }
     
@@ -556,7 +567,8 @@ server <- function(input, output) {
           theme_bw() +
           labs(fill = "") +
           scale_x_date(date_breaks="3 month", limits = as.Date(c(paste0(input$user_year - 1, '-08-01'),paste0(input$user_year, '-07-31')))) +
-          ylim(0,130)
+          ylim(0,130) +
+          theme(text = element_text(size = 15))
       })
     }
   })

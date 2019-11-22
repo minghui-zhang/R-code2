@@ -5,8 +5,8 @@ account: minghui-zhang
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 1334498
-bundleId: 2542359
+bundleId: 2610152
 url: https://minghui-zhang.shinyapps.io/cropTiming2/
-when: 1572233846.78389
+when: 1574440595.25492
 asMultiple: FALSE
 asStatic: FALSE
