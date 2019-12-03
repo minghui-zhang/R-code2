@@ -7,22 +7,39 @@ output: html_document
 
 ```{r}
 
+os_system <- 'mac' # mac for laptop or windows for desktop
+
 library(ggplot2)
 library(tidyverse)
 library(dplyr)
 
-median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
-percentile5_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile5_onset_cell_v2.csv')
-percentile95_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile95_onset_cell_v2.csv')
+if (os_system == 'windows') {
+  median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v2.csv')
+  percentile5_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_onset_cell_v2.csv')
+  percentile95_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_onset_cell_v2.csv')
+  
+  median_muni_raw <- read.csv('E:/R-code2/Modeling/data/median_muni_v2.csv')
+  percentile5_muni_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_muni_v2.csv')
+  percentile95_muni_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_muni_v2.csv')
+  
+  median_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/median_CARpoly_v2.csv')
+  percentile5_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
+  percentile95_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
+}
 
-median_muni_raw <- read.csv('E:/R-code/Modeling/data/median_muni_v2.csv')
-percentile5_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile5_muni_v2.csv')
-percentile95_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile95_muni_v2.csv')
-
-median_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/median_CARpoly_v2.csv')
-percentile5_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile5_CARpoly_v2.csv')
-percentile95_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile95_CARpoly_v2.csv')
-
+if (os_system == 'mac') {
+  median_cell_raw <- read.csv('~/Documents/R-code2/Modeling/data/median_onset_cell_v2.csv')
+  percentile5_cell_raw <- read.csv('~/Documents/R-code2/Modeling/data/percentile5_onset_cell_v2.csv')
+  percentile95_cell_raw <- read.csv('~/Documents/R-code2/Modeling/data/percentile95_onset_cell_v2.csv')
+  
+  median_muni_raw <- read.csv('~/Documents/R-code2/Modeling/data/median_muni_v2.csv')
+  percentile5_muni_raw <- read.csv('~/Documents/R-code2/Modeling/data/percentile5_muni_v2.csv')
+  percentile95_muni_raw <- read.csv('~/Documents/R-code2/Modeling/data/percentile95_muni_v2.csv')
+  
+  median_CARpoly_raw <- read.csv('~/Documents/R-code2/Modeling/data/median_CARpoly_v2.csv')
+  percentile5_CARpoly_raw <- read.csv('~/Documents/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
+  percentile95_CARpoly_raw <- read.csv('~/Documents/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
+}
 ```
 
 ## constants
@@ -45,7 +62,7 @@ median_cell <- subset(median_cell_raw, select = -c(double_area_km2_median,
                                                total_planted_area_km2_median, year_sum, Muni_code_sum) )
 
 median_cell <- median_cell %>% 
-                            rename(
+                            dplyr::rename(
                               double_area_km2 = double_area_km2_sum,
                               double_delay = double_delay_median,
                               double_harvest = double_harvest_median,

@@ -7,19 +7,32 @@ output: html_document
 
 ```{r}
 
+os_system <- 'mac' # mac for laptop or windows for desktop
+
+
 library(ggplot2)
 library(tidyverse)
 library(dplyr)
 library(sp)
-library(rgdal)
+library(rgdal) # not available for R version 3.3.3
 library(rgeos)
-library(tmap)
+library(tmap) # NOT in MAC
 library(spdep)
 library(pgirmess) # spatial correlelogram
+library(sf)
 
-cell_shp <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+if (os_system == 'windows') {
+  cell_shp_filename <- 'E:/R-code2/Modeling/data/shp/median_onset_cell'
+  cell_shp <- readOGR(dsn = cell_shp_filename, layer = 'median_onset_cell_SHP')
+}
+
+if (os_system == 'mac') {
+  #cell_shp_filename <- '~/Documents/R-code2/Modeling/data/shp/median_onset_cell'
+  cell_shp <- st_read('~/Documents/R-code2/Modeling/data/shp/median_onset_cell/median_onset_cell_SHP.shp')
+}
 
 
+#
 ```
 
 ## clean and visualize
@@ -36,6 +49,7 @@ plot_cell_quantiles <- function(year, var.name) {
 
 plot_cell_data <- function(year, var.name) {
   cell_year <- cell_shp[cell_shp$year == year, ]
+
   tm_shape(cell_year) + tm_fill(var.name, palette = "viridis", breaks = seq(from = 0, to = 200, by = 20),
     title = paste("DOY of", var.name, year)) + tm_borders(alpha=.4)
 }
