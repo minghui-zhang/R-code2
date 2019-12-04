@@ -1,0 +1,467 @@
+---
+title: "Robustness Check"
+output: html_document
+---
+
+1. run model for different grid offset, model specification, onset definitions
+2. record model diagnostics and performance (onset coef, residuals, etc)
+3. save model diagnostics as RData
+4. plots
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(rgdal)
+library(rgeos)
+library(raster)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(spdep)
+library(spatialreg)
+library(lmtest)
+library(Metrics) # for rmse
+library(leaflet)
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source('E:/R-code2/Modeling/code/FCN_clean_csvs.R')
+source('E:/R-code2/Modeling/code/FCN_plotting.R')
+source('E:/R-code2/Modeling/code/FCN_sample_data.R')
+source('E:/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R')
+
+onset_type <- 'Gabriel_onset' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+grid_size <- 0.75 # 0.5 for 5 km onset, 0.75 for 25 km onset
+precip_data <- 'Xavier'
+onset_def_type <- 'AA'
+thres <- '25' # keep as string; some will have two or four thres
+onset_scale <- '25km_Gabriel'
+
+if (onset_type != 'Gabriel_onset') {
+  filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+  filename_percentile5 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
+  filename_percentile25 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile25_onset_cell_', onset_type, '.csv')
+
+  filename_shp<- paste0('E:/R-code-large-files/data_onset_', onset_type, '/shp')
+  layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
+  
+  median_cell_raw <- read.csv(filename_median)
+  percentile5_cell_raw <- read.csv(filename_percentile5)
+  percentile25_cell_raw <- read.csv(filename_percentile25)
+  
+  cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+}
+
+if (onset_type == 'Gabriel_onset') {
+  median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v3.csv')
+  percentile5_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_onset_cell_v3.csv')
+  percentile25_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile25_onset_cell_v3.csv')
+  
+  cell_sf <- st_read(dsn = 'E:/R-code2/Modeling/data/shp/median_onset_cell_v3', layer = 'median_onset_cell_SHP_v3')
+}
+
+
+MT_outline <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+grid_1deg <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+# read in all the onsets. only the csv, not shp
+all_onset_types <- c('Gabriel_onset', 'AA_2_persiann', 'AA_3_persiann', 
+                      'AA_25_persiann', 'AA_25_chirps_ATgabriel25km', 'AA_25_persiann_ATgabriel25km',
+                     'freq_5_persiann', 'freq_8_persiann', 'freq_10_persiann', 'freq_12_persiann',
+                     'monsoon_30_persiann', 'monsoon_40_persiann',
+                     'pentad_8_persiann', 'pentad_10_persiann', 'pentad_15_persiann',
+                     'rangethres_10_15_15_30_persiann', 'rangethres_10_15_15_40_persiann',
+                     'rangethres_10_15_20_20_persiann', 'rangethres_10_15_20_30_persiann',
+                     'rangethres_10_15_30_40_persiann', 'thres_10_persiann',
+                     'AA_25_chirps_ATchirps5km', 
+                     'freq_5_chirps_ATchirps5km', 'freq_8_chirps_ATchirps5km', 
+                     'freq_10_chirps_ATchirps5km', 'freq_12_chirps_ATchirps5km',
+                     'rangethres_10_15_15_30_chirps_ATchirps5km',
+                     'rangethres_10_15_15_40_chirps_ATchirps5km',
+                     'rangethres_10_15_20_20_chirps_ATchirps5km',
+                     'rangethres_10_15_20_30_chirps_ATchirps5km',
+                     'rangethres_10_15_30_40_chirps_ATchirps5km')
+# didn't do:  'AA_25_chirps_ATchirps5km'
+
+```
+
+## read and clean spatial data
+
+```{r}
+
+# CSV DATA -----------------------------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+
+
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+
+# SF DATA ------------------------------------------------------------------------------------------------
+
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+
+cell_sf_percentile25 <- cell_sf
+cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+
+# split into SC and DC cells
+cell_sf_tidy_SC <- cell_sf_tidy[cell_sf_tidy$intensity == "SC",]
+cell_sf_tidy_DC <- cell_sf_tidy[cell_sf_tidy$intensity == "DC",]
+
+# plotting
+year <- 2013
+cell_year <- cell_sf_tidy[cell_sf_tidy$year == year, ]
+  
+onset_map <- ggplot(cell_year) +
+  geom_sf(aes(fill = onset)) +
+  scale_fill_viridis() +
+  ggtitle(paste("Onset for spatial sampling", year, onset_type)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+#print(onset_map)
+  
+```
+
+## define descriptors for the chosen onset definition
+
+```{r}
+
+
+
+# define model specification alternatives
+
+lat_offsets <- seq(0, 1.5, by = 0.25) 
+lon_offsets <- seq(0, 1.5, by = 0.25) 
+crop_intensities <- c('SC', 'DC')
+plant_stat_types <- c('median', 'percentile5', 'percentile25')
+
+# the dataframe to add results to. output this at the end for each onset_type
+output_results <- data.frame(
+
+  intensity = character(0),
+  plant_stat_type = character(0),
+  lat_predictor = character(0), # to indicate the presence of predictors. yes or no. NA if using fixed effects
+  lon_predictor = character(0),
+  year_predictor = character(0),
+  region_predictor = character(0),
+  
+  onset_type = character(0),
+  precip_data = character(0),
+  onset_def_type = character(0),
+  thres = character(0),
+  onset_scale = character(0),
+  
+  grid_size = numeric(0),
+  grid_offset_lat = numeric(0),
+  grid_offset_lon = numeric(0),
+  
+  onset_coef = numeric(0),
+  onset_coef_stderr = numeric(0),
+  year_coef = numeric(0),
+  year_coef_stderr = numeric(0),
+  lat_coef = numeric(0),
+  lat_coef_stderr = numeric(0),
+  
+  R2 = numeric(0),
+  bias_meas = numeric(0), # slope of predicted plant to residual
+  slope_onset_residual = numeric(0),
+  slope_fittedPlant_residual = numeric(0),
+  
+  moran_i_residual = numeric(0),
+  moran_i_pval_residual = numeric(0),
+  moran_i_onset = numeric(0),
+  moran_i_pval_onset = numeric(0),
+  moran_i_plant = numeric(0),
+  moran_i_pval_plant = numeric(0)
+)
+```
+
+
+## for the chosen onset type, loop through FE model specifications
+
+```{r}
+
+library(plm) # for FE
+
+# FE model specifications
+
+for (lat_offset in lat_offsets) {
+  for (lon_offset in lon_offsets) {
+    for (plant_stat_type in plant_stat_types) {
+      for (crop_intensity in crop_intensities) {
+  
+        if (crop_intensity == 'SC') {cell_sf_tidy_intensity <- cell_sf_tidy_SC}
+        if (crop_intensity == 'DC') {cell_sf_tidy_intensity <- cell_sf_tidy_DC}
+        
+        # sample from full data and turn into data frame
+        sampled <- get_sampled_data(full_data = cell_sf_tidy_intensity, plant_stat = plant_stat_type, grid_size = grid_size,
+                         lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+        st_geometry(sampled) <- NULL
+        
+        
+        # for plm, first set data as panel data
+        panel <- pdata.frame(sampled,index = c("cell_ID"))
+        
+        # FE model
+        fe_result <- plm(plant ~ onset + year_index, data = panel, model = "within")
+        
+        # save coefficients
+        onset_coef <- summary(fe_result)$coefficients['onset',]['Estimate']
+        onset_coef_stderr <- summary(fe_result)$coefficients['onset',]['Std. Error']
+        year_coef <- summary(fe_result)$coefficients['year_index',]['Estimate']
+        year_coef_stderr <- summary(fe_result)$coefficients['onset',]['Std. Error']
+        
+        # R2
+        SST <- sum((sampled$plant - mean(sampled$plant))^2)
+        SSE <- sum((fe_result$residuals - mean(fe_result$residuals))^2)
+        R2 <- 1 - SSE/SST
+        
+        # model diagnostics: residual, observed plant and fitted plant
+        error_df <- data.frame(residual = fe_result$residuals,
+                               observed = sampled$plant,
+                               fitted =  sampled$plant - fe_result$residuals,
+                               onset = sampled$onset)
+        
+        bias_model <- lm(residual ~ observed, data = error_df)
+        bias_measure <- bias_model$coefficients['observed']
+        
+        onset_residual_model <- lm(residual ~ onset, data = error_df)
+        onset_residual_slope <- onset_residual_model$coefficients['onset']
+        
+        fitted_residual_model <- lm(residual ~ fitted, data = error_df)
+        fitted_residual_slope <- fitted_residual_model$coefficients['fitted']
+        
+        # model diagnostics: spatial autocorrelation of residuals, onset, plant
+        # sample again and keep geometry
+        sampled_withGeom <- get_sampled_data(full_data = cell_sf_tidy_intensity, plant_stat = plant_stat_type, grid_size = grid_size,
+                         lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+        
+        sampled_withGeom$residuals <- fe_result$residuals
+        nb <- poly2nb(sampled_withGeom)
+        
+        resnb <- sapply(nb, function(x) mean(sampled_withGeom$residual[x]))
+        lw <- nb2listw(nb, zero.policy = TRUE)
+        
+        moran_residual <- moran.mc(sampled_withGeom$residual, lw, 999, zero.policy = TRUE)
+        moran_i_residual <- moran_residual$statistic
+        moran_i_pval_residual <- moran_residual$p.value
+        
+        moran_onset <- moran.mc(sampled_withGeom$onset, lw, 999, zero.policy = TRUE)
+        moran_i_onset <- moran_onset$statistic
+        moran_i_pval_onset <- moran_onset$p.value
+        
+        moran_plant <- moran.mc(sampled_withGeom$plant, lw, 999, zero.policy = TRUE)
+        moran_i_plant <- moran_plant$statistic
+        moran_i_pval_plant <- moran_plant$p.value
+        
+        # save
+        output_row <- data.frame(
+          
+          intensity = crop_intensity, plant_stat_type = plant_stat_type,
+         
+          lat_predictor = 'NA', lon_predictor = 'NA',
+          year_predictor = 'yes', region_predictor = 'NA',
+  
+          onset_type = onset_type, precip_data = precip_data, onset_def_type = onset_def_type, 
+          thres = thres, onset_scale = onset_scale,
+          
+          grid_size = grid_size, grid_offset_lat = lat_offset, grid_offset_lon = lon_offset,
+          
+          onset_coef = onset_coef, onset_coef_stderr = onset_coef_stderr,
+          year_coef = year_coef, year_coef_stderr = year_coef_stderr,
+          lat_coef = NA, lat_coef_stderr = NA,
+          
+          
+          R2 = R2, bias_meas = bias_measure, # slope of predicted plant to residual
+          slope_onset_residual = onset_residual_slope, slope_fittedPlant_residual = fitted_residual_slope,
+          
+          moran_i_residual = moran_i_residual, moran_i_pval_residual = moran_i_pval_residual,
+          moran_i_onset = moran_i_onset, moran_i_pval_onset = moran_i_pval_onset,
+          moran_i_plant = moran_i_plant, moran_i_pval_plant = moran_i_pval_plant
+        )
+        
+        output_results <- rbind(output_results, output_row)
+        print('one result complete')
+      }
+    }
+  }
+}
+
+# export test results
+filename = paste0('E:/R-code2/Modeling/output/robustness_test/', onset_type, '_FE.RData')
+save(output_results, file = filename)
+```
+
+## for the chosen onset type, loop through OLS model specifications
+
+
+## for the chosen onset type, loop through OLS model specifications with eliminated predictors
+
+## export robustness test results for the given onset definition
+
+```{r}
+
+
+```
+
+## evaluate different sampling strategies and predictors
+
+```{r}
+
+# test different grid sizes and aggregation strategies. don't do any offset
+
+do_elim_year = TRUE # TOGGLE TRUE IF USE YEAR AS TREND, FALSE IF USE YEAR AS FIXED EFFECT
+grid_size = 0.75
+agg_scheme = FALSE
+plant_stat_type = "percentile25"
+
+results <- data.frame()
+
+
+model_output <- run_OLS(full_data = cell_sf_tidy, 
+                        predictors = c("onset", "intensity",
+                                       "region", "lat", "lon", # for spatial effects: lat, lon, region, Muni_code
+                                       "year_index" # for time effects
+                                       #"onset:intensity" # interactions: for intensity effects
+                        ), 
+                        y.var = "plant", plant_stat = plant_stat_type,
+                        grid_size = grid_size, 
+                        lat_offset = 0, lon_offset = 0, agg_scheme = agg_scheme, 
+                        plot_samples = FALSE, plot_model_evals = TRUE, 
+                        year_oi = 2007,
+                        do_elim_year = do_elim_year,
+                        chosen_intensity = "DC")
+
+
+selected_output <- as.numeric(c(grid_size, agg_scheme, 0, 0,
+                                model_output$onset_coef, model_output$intensity_coef, #model_output$lat_coef,
+                                model_output$R2, model_output$percent_data_used, 
+                                model_output$residual_moran_pval, model_output$onset_moran_pval, 
+                                model_output$plant_moran_pval,
+                                #mean(model_output$prediction_results_elimyear$RMSE, na.rm = TRUE), 
+                                mean(model_output$prediction_results_elimlocation$RMSE, na.rm = TRUE)
+                ))
+
+if (do_elim_year) {
+  selected_output <- c(selected_output, mean(model_output$prediction_results_elimyear$RMSE, na.rm = TRUE))
+}
+
+results <- rbind(results, selected_output)
+
+
+if (do_elim_year) {
+  names(results) <- c("grid_size", "agg_scheme", "lat_offset", "lon_offset",
+                    "onset_coef", "intensity_coef", #"lat_coef",
+                    "R2", "percent_used", "residual_moran_pval", "onset_moran_pval",
+                    "plant_moran_pval",
+                    "mean_RMSE_elimlocation", "mean_RMSE_elimyear")
+}
+if (!do_elim_year) {
+  names(results) <- c("grid_size", "agg_scheme", "lat_offset", "lon_offset",
+                    "onset_coef", "intensity_coef", #"lat_coef",
+                    "R2", "percent_used", "residual_moran_pval", "onset_moran_pval",
+                    "plant_moran_pval",
+                    "mean_RMSE_elimlocation")
+}
+
+
+# calculate mean and sd for each grid size x agg scheme, for different grid offsets
+results_summary <- results %>%
+                        group_by(grid_size, agg_scheme) %>%
+                        summarize(
+                          onset_coef_mean = mean(onset_coef),
+                          intensity_coef_mean = mean(intensity_coef),
+                          R2_mean = mean(R2),
+                          percent_used_mean = mean(percent_used),
+                          residual_moran_pval_mean = mean(residual_moran_pval),
+                          onset_moran_pval_mean = mean(onset_moran_pval),
+                          plant_moran_pval_mean = mean(plant_moran_pval),
+                          RMSE_elimyear_mean = mean(mean_RMSE_elimyear), # TURN OFF IF USE YEAR AS FACTOR
+                          RMSE_elimlocation_mean = mean(mean_RMSE_elimlocation)
+                        )
+
+if (do_elim_year) {
+  elim_year_summary <- results %>%
+    group_by(grid_size, agg_scheme) %>%
+    summarize(
+      RMSE_elimyear_mean = mean(mean_RMSE_elimyear)
+    )
+  
+  results_summary <- cbind(results_summary, elim_year_summary)
+}
+
+# run the SAME OLS again, this time to save the prediction error. then, model prediction error against observed value to get slope (indicator of bias)
+
+sampled <- get_sampled_data(full_data = cell_sf_tidy, plant_stat = plant_stat_type, grid_size = 0.75,
+                 lat_offset = 0, lon_offset = 0, agg_scheme = FALSE, plot_samples = FALSE, year_oi = 2012)
+plant_model <- lm(plant ~ onset + lat + lon + intensity + region + year, data = sampled)
+
+# save residual and observed
+error_df <- data.frame(residual = plant_model$residuals,
+                       observed = sampled$plant)
+
+# model residual vs observed, look at slope as measure of bias
+error_model <- lm(residual ~ observed, data = error_df)
+bias_measure <- error_model$coefficients['observed']
+
+plot(error_df$observed, error_df$residual)
+plot(sampled$onset, error_df$residual)
+plot(sampled$year, error_df$residual)
+plot(sampled$lat, error_df$residual)
+plot(sampled$lon, error_df$residual)
+
+
+print(onset_type)
+print('onset coef')
+print(results_summary$onset_coef_mean)
+print('R2')
+print(results_summary$R2_mean)
+print('RMSE, elim location')
+print(results_summary$RMSE_elimlocation_mean)
+print('RMSE, elim year')
+print(results_summary$RMSE_elimyear_mean)
+print('bias measure')
+print(bias_measure)
+
+```
