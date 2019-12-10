@@ -1,0 +1,582 @@
+---
+title: "Robustness Check Plots"
+output: html_document
+---
+
+1. import modeling results for each onset type
+2. create robustness check plots
+
+## read data
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(broom)
+library(dplyr)
+library(sf)
+library(sp)
+library(tmap)
+library(viridis)
+library(leaflet)
+
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+
+MT_outline <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+grid_1deg <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
+munis <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/munis', layer = 'munis_SHP')
+crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+# read in all the onsets. only the csv, not shp
+all_onset_types <- c('Gabriel_onset', 'AA_2_persiann', 'AA_3_persiann', 
+                      'AA_25_persiann', 'AA_25_chirps_ATgabriel25km', 'AA_25_persiann_ATgabriel25km',
+                     'freq_5_persiann', 'freq_8_persiann', 'freq_10_persiann', 'freq_12_persiann',
+                     'monsoon_30_persiann', 'monsoon_40_persiann',
+                     'pentad_8_persiann', 'pentad_10_persiann', 'pentad_15_persiann',
+                     'rangethres_10_15_15_30_persiann', 'rangethres_10_15_15_40_persiann',
+                     'rangethres_10_15_20_20_persiann', 'rangethres_10_15_20_30_persiann',
+                     'rangethres_10_15_30_40_persiann', 'thres_10_persiann',
+                     'AA_25_chirps_ATchirps5km', 
+                     'freq_5_chirps_ATchirps5km', 'freq_8_chirps_ATchirps5km', 
+                     'freq_10_chirps_ATchirps5km', 'freq_12_chirps_ATchirps5km',
+                     'rangethres_10_15_15_30_chirps_ATchirps5km',
+                     'rangethres_10_15_15_40_chirps_ATchirps5km',
+                     'rangethres_10_15_20_20_chirps_ATchirps5km',
+                     'rangethres_10_15_20_30_chirps_ATchirps5km',
+                     'rangethres_10_15_30_40_chirps_ATchirps5km')
+
+```
+
+## loop through each onset_type and generate cohesive data frame for all onset types
+
+```{r}
+
+# empty data frame to store results
+all_results <- data.frame()
+
+# add in results for each onset_type
+for (onset_type in all_onset_types) {
+  
+  # read the data ---------------------------------------------------------------------------------------------------------
+  filename <- paste0("E:/R-code2/Modeling/output/robustness_test/", onset_type, ".RData")
+  loaded_data <- load(filename)
+  
+  #result_name <- paste0(onset_type, '_results')
+  #assign(result_name, get(loaded_data))
+
+  all_results <- rbind(all_results, get(loaded_data))
+  
+  rm(loaded_data) # Remove the old object since you've stored it in result_name
+
+}
+```
+
+
+# what's the best onset definition for all grid offsets, for each crop intensity, plant stat intensity and model specification?
+## model diagnostics: spatial autocorrelation
+
+```{r} 
+
+# model specifications to loop through.
+# OLS_all_preds = onset, lat, lon, region, year_index
+# OLS_space_only = onset, lat, lon, region
+# OLS_year_only = onset, year_index
+# OLS_no_preds = onset
+model_specifications <- c("FE", "OLS_all_preds", "OLS_space_only", "OLS_year_only", "OLS_no_preds")
+
+# save top five model specs in each model_spec x intensity x plant_stat_type
+top_onsets <- data.frame()
+
+for (model_specification in model_specifications) {
+
+  for (crop_intensity in c("SC", "DC")) {
+    for (plant_stat_type in c("median", "percentile25", "percentile5")) {
+      
+      if (model_specification == "FE") {
+        results <- all_results[all_results$model_type == "FE" & 
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+      }
+      
+      if (model_specification == "OLS_all_preds") {
+        results <- all_results[all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "yes" &
+                                 all_results$year_predictor == "yes" &
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+      }
+      
+      if (model_specification == "OLS_space_only") {
+        results <- all_results[all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "yes" &
+                                 all_results$year_predictor == "no" &
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+      }
+      
+        if (model_specification == "OLS_year_only") {
+          results <- all_results[all_results$model_type == "OLS" & 
+                                   all_results$lat_predictor == "no" &
+                                   all_results$year_predictor == "yes" &
+                                   all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+        }
+      
+        if (model_specification == "OLS_no_preds") {
+          results <- all_results[all_results$model_type == "OLS" & 
+                                   all_results$lat_predictor == "no" &
+                                   all_results$year_predictor == "no" &
+                                   all_results$intensity == crop_intensity & 
+                                   all_results$plant_stat_type == plant_stat_type,]
+        }
+      
+      
+      results$residual_autocorrelated <- results$moran_i_pval_residual <= 0.05
+      
+      # group by onset_type and calculate mean, median, min, max and stdev for each onset_type
+      results_summary <- results %>% group_by(onset_type) %>%
+                                    summarize(mean_onset_coef = mean(onset_coef),
+                                              mean_onset_coef_stderr = mean(onset_coef_stderr),
+                                              mean_year_coef = mean(year_coef),
+                                              mean_year_coef_stderr = mean(year_coef_stderr),
+                                              mean_R2 = mean(R2),
+                                              mean_bias_meas = mean(bias_meas),
+                                              mean_slope_onset_residual = mean(slope_onset_residual),
+                                              mean_slope_fittedPlant_residual = mean(slope_fittedPlant_residual),
+                                              mean_moran_i_residual = mean(moran_i_residual),
+                                              mean_moran_i_pval_residual = mean(moran_i_pval_residual),
+                                              
+                                              sd_onset_coef = sd(onset_coef),
+                                              sd_onset_coef_stderr = sd(onset_coef_stderr),
+                                              sd_year_coef = sd(year_coef),
+                                              sd_year_coef_stderr = sd(year_coef_stderr),
+                                              sd_R2 = sd(R2),
+                                              sd_bias_meas = sd(bias_meas),
+                                              sd_slope_onset_residual = sd(slope_onset_residual),
+                                              sd_slope_fittedPlant_residual = sd(slope_fittedPlant_residual),
+                                              sd_moran_i_residual = sd(moran_i_residual),
+                                              sd_moran_i_pval_residual = sd(moran_i_pval_residual),
+                                              
+                                              min_onset_coef = min(onset_coef),
+                                              min_onset_coef_stderr = min(onset_coef_stderr),
+                                              max_onset_coef = max(onset_coef),
+                                              max_onset_coef_stderr = max(onset_coef_stderr),
+                                              min_moran_i_pval_residual = min(moran_i_pval_residual),
+                                              max_moran_i_pval_residual = max(moran_i_pval_residual),
+                                              
+                                              num_resid_autocorrelated = sum(residual_autocorrelated)
+                                              )
+      
+      results_summary <- results_summary[order(results_summary$mean_onset_coef),]
+      
+      results_summary <- transform(results_summary, onset_type=reorder(onset_type, -mean_onset_coef) ) 
+      
+      # save top five onsets
+      top_onsets <- rbind(top_onsets, data.frame(
+                                                  model_specification = rep(model_specification, 5),
+                                                  crop_intensity = rep(crop_intensity, 5),
+                                                  plant_stat_type = rep(plant_stat_type, 5),
+                                                  onset_type = results_summary$onset_type[(nrow(results_summary)-4):nrow(results_summary)]))
+      
+      best_onset_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_type, y = mean_onset_coef)) +
+        geom_point(aes(x = onset_type,y = min_onset_coef), color = "blue") +
+        geom_point(aes(x = onset_type, y = max_onset_coef), color = "red") +
+        geom_errorbar(aes(x = onset_type, ymin= mean_onset_coef-sd_onset_coef, ymax=mean_onset_coef+sd_onset_coef)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(model_specification, ",", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.6)) +
+        ylab('onset coefficient')
+      
+      R2_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_type, y = mean_R2), color = "blue") +
+        geom_errorbar(aes(x = onset_type, ymin= mean_R2-sd_R2, ymax=mean_R2+sd_R2)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(model_specification, ",", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.7)) +
+        ylab('R2')
+      
+      moran_i_pval_residual_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_type, y = mean_moran_i_pval_residual), color = "black") +
+        geom_errorbar(aes(x = onset_type, ymin= mean_moran_i_pval_residual-sd_moran_i_pval_residual, 
+                          ymax=mean_moran_i_pval_residual+sd_moran_i_pval_residual)) +
+        geom_point(aes(x = onset_type,y = min_moran_i_pval_residual), color = "blue") +
+        geom_point(aes(x = onset_type, y = max_moran_i_pval_residual), color = "red") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(model_specification, ",", crop_intensity, ",", plant_stat_type)) +
+        
+        ylim(c(-0.2, 1.2)) +
+        geom_hline(yintercept = 0.05, color = 'red') +
+        ylab('p-val of morans I for residual')
+      
+      residual_autocorrelation_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_type, y = num_resid_autocorrelated), color = "black") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(model_specification, ",", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 14)) +
+        ylab('number of times residual was autocorrelated')
+      
+      
+      #print(best_onset_plot)
+      print(R2_plot)
+      #print(moran_i_pval_residual_plot)
+      #print(residual_autocorrelation_plot)
+      
+      # percent residuals that are spatially autocorrelated
+      # print(model_specification)
+      # print(crop_intensity)
+      # print(plant_stat_type)
+      # print(paste('percent residuals that are spatially autocorrelated', 100*sum(results$moran_i_pval_residual <= 0.05)/nrow(results)))
+    }
+  }
+}
+```
+
+## histograms of top onsets
+
+```{r}
+
+# only calc top onsets for FE
+top_onsets_FE <- top_onsets[top_onsets$model_specification == "FE",]
+top_onsets_FE_DC <- top_onsets_FE[top_onsets_FE$crop_intensity == "DC",]
+top_onsets_FE_SC <- top_onsets_FE[top_onsets_FE$crop_intensity == "SC",]
+top_onsets_FE_median <- top_onsets_FE[top_onsets_FE$plant_stat_type == "median",]
+top_onsets_FE_percentile25 <- top_onsets_FE[top_onsets_FE$plant_stat_type == "percentile25",]
+top_onsets_FE_percentile5 <- top_onsets_FE[top_onsets_FE$plant_stat_type == "percentile5",]
+
+ggplot(top_onsets_FE, aes(x=reorder(onset_type, -table(onset_type)[onset_type]))) + geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle('Top onset definitions for FE; all crop intensities and plant stats') +
+  xlab('onset type')
+
+ggplot(top_onsets_FE_DC, aes(x=reorder(onset_type, -table(onset_type)[onset_type]))) + geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle('Top onset definitions for FE and DC; all plant stats') +
+  xlab('onset type')
+
+ggplot(top_onsets_FE_SC, aes(x=reorder(onset_type, -table(onset_type)[onset_type]))) + geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle('Top onset definitions for FE and SC; all plant stats') +
+  xlab('onset type')
+
+ggplot(top_onsets_FE_median, aes(x=reorder(onset_type, -table(onset_type)[onset_type]))) + geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle('Top onset definitions for FE and median; all crop intensities') +
+  xlab('onset type')
+
+ggplot(top_onsets_FE_percentile25, aes(x=reorder(onset_type, -table(onset_type)[onset_type]))) + geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle('Top onset definitions for FE and percentile25; all crop intensities') +
+  xlab('onset type')
+
+ggplot(top_onsets_FE_percentile5, aes(x=reorder(onset_type, -table(onset_type)[onset_type]))) + geom_bar() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle('Top onset definitions for FE and percentile5; all crop intensities') +
+  xlab('onset type')
+```
+
+## model diagnostics: R2
+
+```{r}
+
+  for (crop_intensity in c("SC", "DC")) {
+    for (plant_stat_type in c("median", "percentile25", "percentile5")) {
+      
+        results_FE <- all_results[all_results$model_type == "FE" & 
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+        results_FE$model_spec = "FE"
+      
+        results_OLS <- all_results[all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "yes" &
+                                 all_results$year_predictor == "yes" &
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+        results_OLS$model_spec = "OLS"
+      
+      
+        results <- rbind(results_FE, results_OLS)
+        
+      # group by onset_type and calculate mean, median, min, max and stdev for each onset_type
+      results_summary <- results %>% group_by(onset_type, model_spec) %>%
+                                    summarize(mean_onset_coef = mean(onset_coef),
+                                              mean_onset_coef_stderr = mean(onset_coef_stderr),
+                                              mean_R2 = mean(R2),
+                                              
+                                              sd_onset_coef = sd(onset_coef),
+                                              sd_onset_coef_stderr = sd(onset_coef_stderr),
+                                              sd_R2 = sd(R2)
+                                              )
+      
+      results_summary <- results_summary[order(results_summary$mean_onset_coef),]
+      
+      results_summary <- transform(results_summary, onset_type=reorder(onset_type, -mean_onset_coef) ) 
+      
+      R2_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_type, y = mean_R2, col = model_spec)) +
+        geom_errorbar(aes(x = onset_type, ymin= mean_R2-sd_R2, ymax=mean_R2+sd_R2)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(model_specification, ",", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.7)) +
+        ylab('R2')
+      
+      print(R2_plot)
+    }
+  }
+
+
+```
+
+## sensitivity to type of onset definitions vs sensitivity to the specific thresholds chosen
+## only look at FE and persiann
+
+```{r}
+
+
+onset_def_types <- c("AA", "freq", "monsoon", "pentad", "rangethres", "thres")
+
+# save top five model specs in each model_spec x intensity x plant_stat_type
+top_onsets <- data.frame()
+
+
+  for (crop_intensity in c("SC", "DC")) {
+    
+    for (plant_stat_type in c("median", "percentile25", "percentile5")) {
+      
+      
+        results <- all_results[all_results$model_type == "FE" & 
+                                 all_results$precip_data == "persiann" &
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+      
+      # group by onset_type and calculate mean, median, min, max and stdev for each onset_type
+      results_summary <- results %>% group_by(onset_def_type) %>%
+                                    summarize(mean_onset_coef = mean(onset_coef),
+                                              mean_onset_coef_stderr = mean(onset_coef_stderr),
+                                              mean_year_coef = mean(year_coef),
+                                              mean_year_coef_stderr = mean(year_coef_stderr),
+                                              mean_moran_i_pval_residual = mean(moran_i_pval_residual),
+                                              mean_moran_i_pval_onset = mean(moran_i_pval_onset),
+                                              
+                                              sd_onset_coef = sd(onset_coef),
+                                              sd_onset_coef_stderr = sd(onset_coef_stderr),
+                                              sd_year_coef = sd(year_coef),
+                                              sd_year_coef_stderr = sd(year_coef_stderr),
+                                              sd_moran_i_pval_residual = sd(moran_i_pval_residual),
+                                              sd_moran_i_pval_onset = sd(moran_i_pval_onset),
+
+                                              min_onset_coef = min(onset_coef),
+                                              min_onset_coef_stderr = min(onset_coef_stderr),
+                                              max_onset_coef = max(onset_coef),
+                                              max_onset_coef_stderr = max(onset_coef_stderr),
+                                              min_moran_i_pval_residual = min(moran_i_pval_residual),
+                                              min_moran_i_pval_onset = min(moran_i_pval_onset)
+                                              )
+      
+
+      results_summary <- results_summary[order(results_summary$mean_onset_coef),]
+
+      results_summary <- transform(results_summary, onset_def_type=reorder(onset_def_type, -mean_onset_coef) ) 
+
+      best_onset_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_def_type, y = mean_onset_coef)) +
+        geom_point(aes(x = onset_def_type,y = min_onset_coef), color = "blue") +
+        geom_point(aes(x = onset_def_type, y = max_onset_coef), color = "red") +
+        geom_errorbar(aes(x = onset_def_type, ymin= mean_onset_coef-sd_onset_coef, ymax=mean_onset_coef+sd_onset_coef)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste("FE ,", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.6)) +
+        ylab('onset coefficient')
+
+      moran_i_pval_residual_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_def_type, y = mean_moran_i_pval_residual), color = "black") +
+        geom_errorbar(aes(x = onset_def_type, ymin= mean_moran_i_pval_residual-sd_moran_i_pval_residual, 
+                          ymax=mean_moran_i_pval_residual+sd_moran_i_pval_residual)) +
+        geom_point(aes(x = onset_def_type,y = min_moran_i_pval_residual), color = "blue") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste("FE ,", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(-0.2, 1.2)) +
+        geom_hline(yintercept = 0.05, color = 'red') +
+        ylab('p-val of morans I for residual')
+      
+      moran_i_pval_onset_plot <- ggplot(results_summary) +
+        geom_point(aes(x = onset_def_type, y = mean_moran_i_pval_onset), color = "black") +
+        geom_errorbar(aes(x = onset_def_type, ymin= mean_moran_i_pval_onset-sd_moran_i_pval_onset, 
+                          ymax=mean_moran_i_pval_onset+sd_moran_i_pval_onset)) +
+        geom_point(aes(x = onset_def_type,y = min_moran_i_pval_onset), color = "blue") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste("FE ,", crop_intensity, ",", plant_stat_type)) +
+        ylim(c(-0.2, 1.2)) +
+        geom_hline(yintercept = 0.05, color = 'red') +
+        ylab('p-val of morans I for onset')
+      
+      #print(best_onset_plot)
+      #print(moran_i_pval_residual_plot)
+      print(moran_i_pval_onset_plot)
+    }
+  }
+
+
+```
+
+
+
+## Does onset coefficient change more across grid offsets and missing predictors than for different onset definitions, intensities, and plant stat types? (i.e. can we trust that the differences in onset coef that we WANT to see are larger than the 'noise'?)
+
+```{r}
+
+chosen_onset_types <- c("freq_10_persiann", "rangethres_10_15_15_40_persiann", "rangethres_10_15_30_40_persiann", "freq_12_persiann",
+                        "freq_8_persiann", "rangethres_10_15_20_30_persiann")
+
+for (onset_type in chosen_onset_types) {
+      
+      
+        results_FE <- all_results[all_results$model_type == "FE" & 
+                                 all_results$onset_type == onset_type,]
+        results_FE$model_spec = "FE"
+      
+        results_OLSall <- all_results[all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "yes" &
+                                 all_results$year_predictor == "yes" &
+                                 all_results$onset_type == onset_type,]
+        results_OLSall$model_spec = "OLS_all"
+      
+      
+        results_OLSnone <- all_results[all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "no" &
+                                 all_results$year_predictor == "no" &
+                                 all_results$onset_type == onset_type,]
+        results_OLSnone$model_spec = "OLS_none"
+        
+        results <- rbind(results_FE, results_OLSall, results_OLSnone)
+        
+        results <- unite(results, col = "desc", model_spec, intensity, plant_stat_type, remove = FALSE)
+        
+      # group by onset_type and calculate mean, median, min, max and stdev for each onset_type
+      results_summary <- results %>% group_by(desc, model_spec, plant_stat_type, intensity) %>%
+                                    summarize(mean_onset_coef = mean(onset_coef),
+                                              mean_onset_coef_stderr = mean(onset_coef_stderr),
+                                              mean_R2 = mean(R2),
+                                              
+                                              sd_onset_coef = sd(onset_coef),
+                                              sd_onset_coef_stderr = sd(onset_coef_stderr),
+                                              sd_R2 = sd(R2)
+                                              )
+      
+      
+      onset_coef_plot <- ggplot(results_summary) +
+        geom_point(aes(x = desc, y = mean_onset_coef, col = model_spec, shape = intensity)) +
+        geom_errorbar(aes(x = desc, ymin= mean_onset_coef-sd_onset_coef, ymax=mean_onset_coef+sd_onset_coef, col = model_spec)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(onset_type)) +
+        ylim(c(0, 0.7)) +
+        ylab('onset coef')
+      
+      print(onset_coef_plot)
+    }
+  
+
+```
+
+## look at onset coef's sensitivity to eliminated predictors in OLS
+
+```{r}
+
+onset_type <- "freq_10_persiann"
+for (crop_intensity in c("SC", "DC")) {
+    for (plant_stat_type in c("median", "percentile25", "percentile5")) {
+      
+        results_FE <- all_results[all_results$model_type == "FE" & 
+                                 all_results$onset_type == onset_type &
+                                  all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+        results_FE$model_spec = "FE"
+     
+        results_OLSall <- all_results[all_results$onset_type == onset_type &
+                                 all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "yes" &
+                                 all_results$year_predictor == "yes" &
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+      
+        results_OLSspaceonly <- all_results[all_results$onset_type == onset_type &
+                                 all_results$model_type == "OLS" & 
+                                 all_results$lat_predictor == "yes" &
+                                 all_results$year_predictor == "no" &
+                                 all_results$intensity == crop_intensity & 
+                                 all_results$plant_stat_type == plant_stat_type,]
+      
+        results_OLSyearonly <- all_results[all_results$onset_type == onset_type &
+                                all_results$model_type == "OLS" & 
+                                all_results$lat_predictor == "no" &
+                                all_results$year_predictor == "yes" &
+                                all_results$intensity == crop_intensity & 
+                                all_results$plant_stat_type == plant_stat_type,]
+
+        results_OLSnone <- all_results[all_results$onset_type == onset_type &
+                                   all_results$model_type == "OLS" & 
+                                   all_results$lat_predictor == "no" &
+                                   all_results$year_predictor == "no" &
+                                   all_results$intensity == crop_intensity & 
+                                   all_results$plant_stat_type == plant_stat_type,]
+      
+        results_FE$model_spec = "FE"
+        results_OLSall$model_spec = "OLS_all"
+        results_OLSspaceonly$model_spec = "OLS_spaceonly"
+        results_OLSyearonly$model_spec = "OLS_yearonly"
+        results_OLSnone$model_spec = "OLS_none"
+        
+        results <- rbind(results_FE, results_OLSall, results_OLSspaceonly, results_OLSyearonly, results_OLSnone)
+        results <- unite(results, col = "desc", model_spec, intensity, plant_stat_type, remove = FALSE)
+        
+        # group by onset_type and calculate mean, median, min, max and stdev for each onset_type
+        results_summary <- results %>% group_by(model_spec) %>%
+                                    summarize(mean_onset_coef = mean(onset_coef),
+                                              mean_onset_coef_stderr = mean(onset_coef_stderr),
+                                              
+                                              
+                                              sd_onset_coef = sd(onset_coef),
+                                              sd_onset_coef_stderr = sd(onset_coef_stderr),
+                                              
+                                              
+                                              min_onset_coef = min(onset_coef),
+                                              min_onset_coef_stderr = min(onset_coef_stderr),
+                                              max_onset_coef = max(onset_coef),
+                                              max_onset_coef_stderr = max(onset_coef_stderr)
+                                              )
+      
+      onset_coef_plot <- ggplot(results_summary) +
+        geom_point(aes(x = model_spec, y = mean_onset_coef)) +
+        geom_point(aes(x = model_spec,y = min_onset_coef), color = "blue") +
+        geom_point(aes(x = model_spec, y = max_onset_coef), color = "red") +
+        geom_errorbar(aes(x = model_spec, ymin= mean_onset_coef-sd_onset_coef, ymax=mean_onset_coef+sd_onset_coef)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste0(onset_type, ", ", crop_intensity, ", ", plant_stat_type)) +
+        ylim(c(0, 0.6)) +
+        ylab('onset coefficient')
+      
+      print(onset_coef_plot)
+    }
+  }
+
+```
