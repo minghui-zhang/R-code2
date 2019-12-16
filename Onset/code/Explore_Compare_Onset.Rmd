@@ -22,16 +22,21 @@ library(spdep)
 library(Metrics) # for rmse
 library(leaflet)
 
-source('E:/R-code2/Modeling/code/FCN_clean_csvs.R')
-source('E:/R-code2/Modeling/code/FCN_plotting.R')
-source('E:/R-code2/Modeling/code/FCN_sample_data.R')
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_plotting.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_sample_data.R'))
 
 onset_type <- 'thres_10_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
 
 
 if (onset_type != 'Gabriel_onset') {
-  filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
-  filename_shp<- paste0('E:/R-code-large-files/data_onset_', onset_type, '/shp')
+  filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+  filename_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
   layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
   
   median_cell_raw <- read.csv(filename_median)
@@ -40,17 +45,17 @@ if (onset_type != 'Gabriel_onset') {
 }
 
 if (onset_type == 'Gabriel_onset') {
-  median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v2.csv')
+  median_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_onset_cell_v2.csv'))
   
-  cell_sf <- st_read(dsn = 'E:/R-code2/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+  cell_sf <- st_read(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/median_onset_cell'), layer = 'median_onset_cell_SHP')
 }
 
 
-MT_outline <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
-grid_1deg <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
-munis <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/munis', layer = 'munis_SHP')
+grid_1deg <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/grid_1deg'), layer = 'grid_1deg')
+munis <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/munis'), layer = 'munis_SHP')
 crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
 # read in all the onsets. only the csv, not shp
@@ -84,14 +89,15 @@ all_onset_data <- data.frame(onset = numeric(0),
                              onset_type = character(0))
 
 for (onset_name in all_onset_types) {
+  
   if (onset_name != 'Gabriel_onset') {
-    filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_name, 
+    filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_name, 
                               '/median_onset_cell_', onset_name, '.csv')
     data <- read.csv(filename_median)
   }
   
   if (onset_name == 'Gabriel_onset') {
-    data <- median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v2.csv')
+    data <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_onset_cell_v2.csv'))
   }
   
   onset_data <- data[,c('onset_median', 'latitude_median', 'longitude_median', 'year_median')]

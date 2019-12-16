@@ -24,13 +24,18 @@ library(spdep)
 library(spatialreg)
 library(lmtest)
 
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
 #E:/R-code/Modeling/code/FCN_clean_csvs.R
 #~/Documents/R-code
-source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
 
-median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
+median_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_onset_cell_v2.csv'))
 
-MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
 #cell_shp <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
@@ -60,7 +65,7 @@ median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
 
 ```{r}
 
-cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+cell_sf <- st_read(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/median_onset_cell'), layer = 'median_onset_cell_SHP')
 
 # add cell_ID
 clean_cell_ID <- function(cell_ID) {

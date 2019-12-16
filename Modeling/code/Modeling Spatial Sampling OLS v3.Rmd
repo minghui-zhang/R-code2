@@ -30,24 +30,29 @@ library(Metrics) # for rmse
 library(leaflet)
 library(leaps) # stepwise model selection
 
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
 #E:/R-code/Modeling/code/FCN_clean_csvs.R
 #~/Documents/R-code
-source('E:/R-code2/Modeling/code/FCN_clean_csvs.R')
-source('E:/R-code2/Modeling/code/FCN_plotting.R')
-source('E:/R-code2/Modeling/code/FCN_sample_data.R')
-source('E:/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R')
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_plotting.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_sample_data.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R'))
 
-MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
 onset_type <- 'AA_25_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
 
 if (onset_type != 'Gabriel_onset') {
-  filename_median <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
-  filename_percentile5 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
-  filename_percentile25 <- paste0('E:/R-code-large-files/data_onset_', onset_type, '/percentile25_onset_cell_', onset_type, '.csv')
+  filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+  filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
+  filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/percentile25_onset_cell_', onset_type, '.csv')
 
-  filename_shp<- paste0('E:/R-code-large-files/data_onset_', onset_type, '/shp')
+  filename_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
   layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
   
   median_cell_raw <- read.csv(filename_median)
@@ -58,15 +63,15 @@ if (onset_type != 'Gabriel_onset') {
 }
 
 if (onset_type == 'Gabriel_onset') {
-  median_cell_raw <- read.csv('E:/R-code2/Modeling/data/median_onset_cell_v3.csv')
-  percentile5_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_onset_cell_v3.csv')
-  percentile25_cell_raw <- read.csv('E:/R-code2/Modeling/data/percentile25_onset_cell_v3.csv')
+  median_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_onset_cell_v3.csv'))
+  percentile5_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_onset_cell_v3.csv'))
+  percentile25_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile25_onset_cell_v3.csv'))
   
-  cell_sf <- st_read(dsn = 'E:/R-code2/Modeling/data/shp/median_onset_cell_v3', layer = 'median_onset_cell_SHP_v3')
+  cell_sf <- st_read(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/median_onset_cell_v3'), layer = 'median_onset_cell_SHP_v3')
 }
 
-grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
-munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+grid_1deg <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/grid_1deg'), layer = 'grid_1deg')
+munis <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/munis'), layer = 'munis_SHP')
 crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
 min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
@@ -146,10 +151,10 @@ do_elim_year = TRUE # TOGGLE TRUE IF USE YEAR AS TREND, FALSE IF USE YEAR AS FIX
 
 results <- data.frame()
 
-for (grid_size in seq(0.25, 1, 0.25)) { # 0.25 to 1.75, seq(0.75, 1.25, 0.25)
+for (grid_size in seq(0.5, 0.5, 0.25)) { # 0.25 to 1.75, seq(0.75, 1.25, 0.25)
   for (agg_scheme in c(FALSE)) {
-    for (lat_offset in seq(0, 1, by = 0.25)) { # 0 to 1.5
-      for (lon_offset in seq(0, 1, by = 0.25)) { # 0 to 1.5
+    for (lat_offset in seq(0, 0, by = 0.25)) { # 0 to 1.5
+      for (lon_offset in seq(0, 0, by = 0.25)) { # 0 to 1.5
         
         model_output <- run_OLS(full_data = cell_sf_tidy, 
                               predictors = c("onset", "intensity",
@@ -209,7 +214,7 @@ if (!do_elim_year) {
 results$agg_scheme <- as.factor(results$agg_scheme)
 
 # SAVED RESULTS
-saveRDS(results, "spatial_sampling_results.rds")
+#saveRDS(results, "spatial_sampling_results.rds")
 
 # calculate mean and sd for each grid size x agg scheme, for different grid offsets
 results_summary <- results %>%
@@ -251,8 +256,8 @@ if (do_elim_year) {
 # compare grid sizes and aggregation schemes
 
 plot_results <- function(data, x_data, y_data, x_label, y_label, col_data) {
-  ggplot(data, aes(x = x_data, y = y_data, col = col_data)) +
-    geom_line() +
+  ggplot(data, mapping = aes(x = x_data, y = y_data, col = col_data)) +
+    geom_line(data, mapping = aes(x = x_data, y = y_data, col = col_data)) +
     ggtitle(y_label) +
     xlab(x_label) +
     ylab(y_label)+
@@ -261,8 +266,8 @@ plot_results <- function(data, x_data, y_data, x_label, y_label, col_data) {
 }
 
 plot_results_summary <- function(data, x_data, y_data, y_sd, x_label, y_label, col_data) {
-  ggplot(data, aes(x = x_data, y = y_data, col = col_data)) +
-    geom_line() +
+  ggplot(data, mapping = aes(x = x_data, y = y_data, col = col_data)) +
+    geom_line(data, mapping = aes(x = x_data, y = y_data, col = col_data)) +
     geom_errorbar(aes(ymin=y_data-y_sd, ymax=y_data+y_sd), position=position_dodge(0.05)) +
     ggtitle(y_label) +
     xlab(x_label) +

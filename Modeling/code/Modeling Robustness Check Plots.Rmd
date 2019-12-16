@@ -20,15 +20,19 @@ library(tmap)
 library(viridis)
 library(leaflet)
 
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
 
 #E:/R-code/Modeling/code/FCN_clean_csvs.R
 #~/Documents/R-code
 
-MT_outline <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
-grid_1deg <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
-munis <- readOGR(dsn = 'E:/R-code2/Modeling/data/shp/munis', layer = 'munis_SHP')
+grid_1deg <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/grid_1deg'), layer = 'grid_1deg')
+munis <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/munis'), layer = 'munis_SHP')
 crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
 # read in all the onsets. only the csv, not shp
@@ -62,7 +66,7 @@ all_results <- data.frame()
 for (onset_type in all_onset_types) {
   
   # read the data ---------------------------------------------------------------------------------------------------------
-  filename <- paste0("E:/R-code2/Modeling/output/robustness_test/", onset_type, ".RData")
+  filename <- paste0(first_folder,"/R-code2/Modeling/output/robustness_test/", onset_type, ".RData")
   loaded_data <- load(filename)
   
   #result_name <- paste0(onset_type, '_results')
@@ -92,7 +96,6 @@ model_specifications <- c("FE", "OLS_all_preds", "OLS_space_only", "OLS_year_onl
 top_onsets <- data.frame()
 
 for (model_specification in model_specifications) {
-
   for (crop_intensity in c("SC", "DC")) {
     for (plant_stat_type in c("median", "percentile25", "percentile5")) {
       

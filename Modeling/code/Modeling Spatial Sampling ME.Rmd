@@ -8,9 +8,10 @@ output: html_document
 
 ```{r}
 
-os_system <- 'mac' # mac for laptop or windows for desktop
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
 if (os_system == 'windows') {first_folder <- 'E:'}
 if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
 
 library(ggplot2)
 library(tidyverse)
@@ -165,7 +166,7 @@ library(lme4) # for lmer()
 # print(ols_results)
 
 # FE
-source('E:/R-code2/Modeling/code/FCN_run_any_model_spatial_sampled.R') # OLS, FE, RE and ME
+source(paste0(first_folder, '/R-code2/Modeling/code/FCN_run_any_model_spatial_sampled.R')) # OLS, FE, RE and ME
 fe_results <- run_any_model(full_data = cell_sf_tidy_DC, model_type = "FE", predictors = c("onset", "year_index"), 
                             ME_randomEffects = character(0), FE_RE_effect = c("cell_ID"),
                             y.var = "plant", plant_stat = "median",

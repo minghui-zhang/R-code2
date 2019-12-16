@@ -7,7 +7,7 @@ output: html_document
 
 ```{r}
 
-os_system <- 'mac' # mac for laptop or windows for desktop
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
 
 library(ggplot2)
 library(tidyverse)
@@ -25,6 +25,20 @@ if (os_system == 'windows') {
   median_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/median_CARpoly_v2.csv')
   percentile5_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
   percentile95_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
+}
+
+if (os_system == 'windows_laptop') {
+  median_cell_raw <- read.csv('D:/R-code2/Modeling/data/median_onset_cell_v2.csv')
+  percentile5_cell_raw <- read.csv('D:/R-code2/Modeling/data/percentile5_onset_cell_v2.csv')
+  percentile95_cell_raw <- read.csv('D:/R-code2/Modeling/data/percentile95_onset_cell_v2.csv')
+  
+  median_muni_raw <- read.csv('D:/R-code2/Modeling/data/median_muni_v2.csv')
+  percentile5_muni_raw <- read.csv('D:/R-code2/Modeling/data/percentile5_muni_v2.csv')
+  percentile95_muni_raw <- read.csv('D:/R-code2/Modeling/data/percentile95_muni_v2.csv')
+  
+  median_CARpoly_raw <- read.csv('D:/R-code2/Modeling/data/median_CARpoly_v2.csv')
+  percentile5_CARpoly_raw <- read.csv('D:/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
+  percentile95_CARpoly_raw <- read.csv('D:/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
 }
 
 if (os_system == 'mac') {

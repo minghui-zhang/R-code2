@@ -24,37 +24,42 @@ library(tmap)
 library(viridis)
 library(spdep)
 library(spatialreg)
-library(splm)
+#library(splm)
 library(lmtest)
 library(Metrics)
 
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
 #E:/R-code/Modeling/code/FCN_clean_csvs.R
 #~/Documents/R-code
-source('E:/R-code/Modeling/code/FCN_clean_csvs.R')
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
 
-MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
-median_cell_raw <- read.csv('E:/R-code/Modeling/data/median_onset_cell_v2.csv')
-percentile5_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile5_onset_cell_v2.csv')
-percentile95_cell_raw <- read.csv('E:/R-code/Modeling/data/percentile95_onset_cell_v2.csv')
+median_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_onset_cell_v2.csv'))
+percentile5_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_onset_cell_v2.csv'))
+percentile95_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile95_onset_cell_v2.csv'))
 
-median_muni_raw <- read.csv('E:/R-code/Modeling/data/median_muni_v2.csv')
-percentile5_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile5_muni_v2.csv')
-percentile95_muni_raw <- read.csv('E:/R-code/Modeling/data/percentile95_muni_v2.csv')
+median_muni_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_muni_v2.csv'))
+percentile5_muni_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_muni_v2.csv'))
+percentile95_muni_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile95_muni_v2.csv'))
 
-median_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/median_CARpoly_v2.csv')
-percentile5_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile5_CARpoly_v2.csv')
-percentile95_CARpoly_raw <- read.csv('E:/R-code/Modeling/data/percentile95_CARpoly_v2.csv')
+median_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_CARpoly_v2.csv'))
+percentile5_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_CARpoly_v2.csv'))
+percentile95_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile95_CARpoly_v2.csv'))
 
-grid_1deg <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/grid_1deg', layer = 'grid_1deg')
-munis <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/munis', layer = 'munis_SHP')
+grid_1deg <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/grid_1deg'), layer = 'grid_1deg')
+munis <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/munis'), layer = 'munis_SHP')
 crs(munis) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
   
-MT_outline <- readOGR(dsn = 'E:/R-code/Modeling/data/shp/MatoGrossoOutline', layer = 'MatoGrossoOutline')
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
 crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 
-cell_sf <- st_read(dsn = 'E:/R-code/Modeling/data/shp/median_onset_cell', layer = 'median_onset_cell_SHP')
+cell_sf <- st_read(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/median_onset_cell'), layer = 'median_onset_cell_SHP')
 
 min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
 

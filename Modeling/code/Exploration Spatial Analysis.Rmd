@@ -7,7 +7,7 @@ output: html_document
 
 ```{r}
 
-os_system <- 'mac' # mac for laptop or windows for desktop
+os_system <- 'windows_laptop' # mac for laptop or windows for desktop
 
 
 library(ggplot2)
@@ -31,7 +31,9 @@ if (os_system == 'mac') {
   cell_shp <- st_read('~/Documents/R-code2/Modeling/data/shp/median_onset_cell/median_onset_cell_SHP.shp')
 }
 
-
+if (os_system == 'windows_laptop') {
+  cell_shp <- st_read('D:/R-code2/Modeling/data/shp/median_onset_cell')
+}
 #
 ```
 
@@ -54,15 +56,15 @@ plot_cell_data <- function(year, var.name) {
     title = paste("DOY of", var.name, year)) + tm_borders(alpha=.4)
 }
 
-for (year in 2004:2014) {
-  print(plot_cell_quantiles(year, "onset"))
+for (year in 2004:2004) {
+  #print(plot_cell_quantiles(year, "onset"))
   print(plot_cell_data(year, "onset"))
   
-  print(plot_cell_quantiles(year, "DC_plant"))
-  print(plot_cell_data(year, "DC_plant"))
+  #print(plot_cell_quantiles(year, "DC_plant"))
+  #print(plot_cell_data(year, "DC_plant"))
     
-  print(plot_cell_quantiles(year, "DC_delay"))
-  print(plot_cell_data(year, "DC_delay"))
+  #print(plot_cell_quantiles(year, "DC_delay"))
+  #print(plot_cell_data(year, "DC_delay"))
 }
 
 
