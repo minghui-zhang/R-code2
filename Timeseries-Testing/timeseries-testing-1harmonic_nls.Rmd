@@ -15,7 +15,7 @@ library(zoo)
 library(ggplot2)
 
 # need to read in, because regardless of whether use smooth or unsmoothed EVI for the other fitting methods, must start with nonsmoothed EVI here. doubly smoothed EVI (20, 20) is in the csv
-ts <- read.csv('point3.csv')[,1:2]
+ts <- read.csv('planet_point12.csv')[,1:2]
 
 colnames(ts) <- c('date', 'EVI_raw')
 ts$date <- as.Date(ts$date, '%d-%h-%y')
@@ -326,7 +326,7 @@ text = element_text(size=15)) +
 ```{r}
 # ts, window_EVI_1, window_EVI_2, numMissingPts, risingLimb_start_DOY, risingLimb_end_DOY, fallingLimb_start_DOY, fallingLimb_end_DOY, fittingStartDay, fittingEndDay
 
-print(harmonic_nls_simple_algorithm(ts, 0, 0, 0, 10, 120, 110, 200, '2016-09-01', '2017-02-01'))
+print(harmonic_nls_simple_algorithm(ts, 0, 0, 0, 40, 130, 110, 170, '2016-09-01', '2017-03-01'))
 ```
 
 ## Harmonic nls computation

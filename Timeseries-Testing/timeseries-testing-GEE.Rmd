@@ -15,7 +15,7 @@ library(zoo)
 library(ggplot2)
 
 # need to read in, because regardless of whether use smooth or unsmoothed EVI for the other fitting methods, must start with nonsmoothed EVI here. doubly smoothed EVI (20, 20) is in the csv
-ts <- read.csv('point1.csv')[,1:2]
+ts <- read.csv('planet_point12.csv')[,1:2]
 
 colnames(ts) <- c('date', 'EVI_raw')
 ts$date <- as.Date(ts$date, '%d-%h-%y')
@@ -319,7 +319,6 @@ text = element_text(size=15)) +
 
 ```{r}
 print(R_GEE_algorithm(ts, 20, 20, 40, 0))
-  
 ```
 
 ## Computations
