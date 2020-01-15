@@ -1,0 +1,153 @@
+---
+title: "Model_Specification"
+output: html_document
+---
+
+Does the model specification steps
+
+
+For a given onset definition, perform model specification steps
+
+```{r}
+
+# import data
+
+# select the onset definition
+
+```
+
+Choose observation scale
+
+```{r}
+
+# Criteria 1: R2 of OLS model
+# Run OLS model with (1) all data points, (2) year, onset, lat, lon, for (3) the chosen onset, (4) at each observation scale (cell 5km, cell 25km, CARpoly, muni) and (5) each planting percentile
+# Return R2 for each observation scale
+
+# Criteria 2:
+
+```
+
+Plot planting date, aggregated to cell, carpoly and muni scales
+
+```{r}
+
+
+```
+
+Choose predictors
+
+```{r}
+
+# Only OLS prediction, using all data points
+
+# Choose from the following pool: onset, year, intensity, lat, lon, age of soy, region, range of historical onset from 2004 to 2014, onset:intensity, percentile, onset:percentile, onset:year, onset:lat, onset:lon and maybe other interactions
+
+# With onset fixed as one of the predictors, add stepwise according to adj R2 and partial F test
+
+# Return the top six predictors (and their p-values)
+
+```
+
+
+Spatial and temporal autocorrelation
+
+```{r}
+
+# for both OLS and FE, run model with chosen predictors and all data points (separated by intensity and percentile)
+
+# calculate temporal autocorrelation (Durbin-Watson) and map. Calculate percent of temporally autocorrelated cells after Bonferroni correction
+
+# calculate average spatial autocorrelation (Moran's I) across all years
+
+# sampling grid: size choice for both OLS and FE
+# for each sampling grid size (and offset), report spatial autocorrelation, prediction accuracy in new years and locations, percent total data used, coefficients' sensitivity to sampling grid position
+
+# return the best sampling grid size for the given onset/scale, for both OLS and FE
+
+```
+
+Figures for choosing sampling grid size (grid size on x axis, and various metrics on y axis; with error bars for sampling grid location)
+
+```{r}
+
+
+```
+
+
+Map of sampling grid position, sampling grid size
+
+```{r}
+
+```
+
+Model type
+
+```{r}
+
+# for each OLS, FE and RF; and also for each intensity x percentile; and for each grid sampling offset, train and get prediction accuracy for (1) 70%/30% train-test split; (2) prediction at new years; (3) prediction at new locations
+
+# Hausmann test for OLS vs FE
+
+```
+
+Plot of prediction accuracy metrics for each model type
+
+```{r}
+
+# rmse vs eliminated year, summarized for different intensities and percentiles and sampling grid locations
+
+# rmse vs eliminated cell
+
+# calculate mean rmse for all prediction accuracies
+
+```
+
+Model evaluation
+
+```{r}
+# for the chosen FE specification, but for each intensity x percentile and grid offset, do model evaluation:
+
+# residuals of zero mean
+
+# QQ plot for residuals
+
+# correlation between residual and each of the predictors
+
+# spatial and temporal autocorrelation of residual
+
+# correlation of selected predictors (to each other)
+
+# residual vs fitted value plot (look for no pattern and constant variance)
+
+```
+
+
+Model results
+
+```{r}
+
+# onset and year coef for each intensity and percentile, along with errors representing sampling grid location. do for each chosen onset definition
+
+# add cumulative error due to standard error, sampling grid position, eliminated predictors, error in planting date estimate?
+
+# include results for 95th percentile?
+
+```
+
+Map of fixed effects that were estimated
+
+```{r}
+
+# use all cells for the FE model; produce maps for SC and DC separately
+
+```
+
+Map of predictive error for OLS and FE
+
+```{r}
+
+# use all cells for OLS and FE models; produce maps for SC and DC separately
+
+```
+

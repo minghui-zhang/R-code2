@@ -1,0 +1,98 @@
+---
+title: "Onset_Selection"
+output: html_document
+---
+
+
+```{r}
+
+# import data
+
+```
+
+Perform chosen FE model specification for each onset definition
+
+```{r}
+
+# do FE model, tabulate onset coef for different intensities, precip datasets, percentiles
+
+```
+
+Plot onset coefficient for each onset x precip x scale
+
+```{r}
+
+# include error bars for sampling grid location
+# FE model for each intensity and percentile
+# group the x axis by precip type, scale
+
+# barplots for the most frequently occuring 'top onset' across intensities and percentiles
+
+```
+
+Plot of within-year spatial variability for each onset definition
+
+```{r}
+
+# boxplot or barplot, year on x axis
+
+```
+
+Map of within-year spatial variability (averaged quantiles through the years) for onsets and planting
+
+```{r}
+
+
+
+```
+
+Map of long-term spatial pattern in differences between onset definitions
+
+```{r}
+
+# subtract AA definition from the top onset definitions
+
+# subtract the top onset definitions from each other
+
+# subtract, within a single onset definition, the result of using different thresholds
+
+```
+
+Timeseries of onset, averaged over space
+
+```{r}
+
+# error bars for spatial variability?
+
+```
+
+Robustness tests
+
+```{r}
+
+# eliminated predictors: repeat the OLS and FE specifications with eliminated predictors for the chosen onset definition. report onset coefficient for each intensity, percentile
+
+# summarize uncertainty in onset coef as a standard deviation
+
+# two-group t-test comparing onset coefficients for different onset definitions, cropping intensities, and percentiles
+# calc onset coef difference t-test between SC and DC for each onset def, percentile
+# calc onset coef difference t-test between onset definitions, for each percentile and intenssity
+# calc onset coef difference t-test between percentiles, for each onset definition
+
+```
+
+Plot of onset coefficient sensitivity to eliminated predictors
+
+```{r}
+
+# different degrees of elimianted predictors on x axis, and onset coef on y axis
+
+```
+
+Plot of onset coefficients for different onset definitions, intensities, and percentiles
+
+```{r}
+
+```
+
+
