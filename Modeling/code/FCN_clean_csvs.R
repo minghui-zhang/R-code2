@@ -380,6 +380,18 @@ cell_categorize_soy_age <- function(cell) {
   return(cell)
 }
 
+cell_sf_categorize_soy_age <- function(cell) {
+  
+  soy_age <- rep("z_neither", sum(cell$year == "2004"))
+  cell_area_2004 <- cell[cell$year == "2004", "soy_area_k"]
+  cell_area_2014 <- cell[cell$year == "2014", "soy_area_k"]
+  soy_age[(cell_area_2004$soy_area_k < min_soy_area) & (cell_area_2014$soy_area_k >= min_soy_area)] <- "new"
+  soy_age[(cell_area_2004$soy_area_k >= min_soy_area) & (cell_area_2014$soy_area_k >= min_soy_area)] <- "old"
+  cell$soy_age <- rep(soy_age, 11)
+  
+  return(cell)
+}
+
 # CAR poly functions
 rename_cols_median_CARpoly <- function(median_CARpoly_raw) {
   output = median_CARpoly_raw %>%

@@ -10,60 +10,718 @@ For a given onset definition, perform model specification steps
 
 ```{r}
 
-# import data
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(rgdal)
+library(raster)
+library(sf)
+library(sp)
+library(leaps)
+library(viridis)
+library(spatial)
+library(spdep)
+library(plm)
+library(lmtest)
+library(Metrics)
 
 # select the onset definition
+onset_type <- 'freq_10_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+
+# import data for all sections
+os_system <- 'windows' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_plotting.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_sample_data.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R'))
+
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+min_soy_area <- 2 #km2. min area of total or SC/DC soy in cell, muni or property to be considered in model
 
 ```
+
+Clean data
+
+TO DO: AFTER EXTRACT CAR POLY AND MUNI SCALE DATA FOR THE NEW ONSET DEFINITIONS, WON'T NEED TO HAVE SECTION-SPECIFIC DATA IMPORTS AND CLEANING
+
+```{r}
+
+
+
+```
+
 
 Choose observation scale
 
+TO DO
+NOTE, THIS IS FOR GABRIEL'S AA ONSET BECAUSE DON'T HAVE MUNI AND CARPOLY EXTRACTIONS FOR OTHER ONSET DEFINITIONS YET
+RUN FOR EACH PLANTING PERCENTILE (5, 25, 50; HERE, DON'T HAVE 25 BUT HAVE 95)
+
 ```{r}
 
-# Criteria 1: R2 of OLS model
-# Run OLS model with (1) all data points, (2) year, onset, lat, lon, for (3) the chosen onset, (4) at each observation scale (cell 5km, cell 25km, CARpoly, muni) and (5) each planting percentile
+# import data for this section. ------------------------------------------------------------------------------------------
+# 
+
+median_cell_raw <- read.csv(paste0(first_folder, '/R-code2/Modeling/data/median_onset_cell_v2.csv'))
+percentile5_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_onset_cell_v2.csv'))
+percentile95_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile95_onset_cell_v2.csv'))
+
+median_muni_raw <- read.csv(paste0(first_folder, '/R-code2/Modeling/data/median_muni_v2.csv'))
+percentile5_muni_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_muni_v2.csv'))
+percentile95_muni_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile95_muni_v2.csv'))
+
+median_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_CARpoly_v2.csv'))
+percentile5_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_CARpoly_v2.csv'))
+percentile95_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile95_CARpoly_v2.csv'))
+
+# clean data for this section. ------------------------------------------------------------------------------
+
+# CARpoly 
+median_CARpoly_raw <- rename_cols_median_CARpoly(median_CARpoly_raw)
+percentile5_CARpoly_raw <- rename_cols_percentile5_CARpoly(percentile5_CARpoly_raw)
+percentile95_CARpoly_raw <- rename_cols_percentile95_CARpoly(percentile95_CARpoly_raw)
+CARpoly_raw <- create_CARpoly_raw(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw)
+
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+percentile5_cell <- percentile5_cell_raw %>% filter(year > 0)
+percentile95_cell <- percentile95_cell_raw %>% filter(year > 0)
+
+# median muni
+median_muni <- median_muni_raw %>% rename_cols_median_muni()
+percentile5_muni <- percentile5_muni_raw %>% filter(year > 0)
+percentile95_muni <- percentile95_muni_raw %>% filter(year > 0)
+
+# create tidy datasets
+cell_tidy <- tidy_combine_cell(median_cell, percentile5_cell, percentile95_cell)
+muni_tidy <- tidy_combine_muni(median_muni, percentile5_muni, percentile95_muni)
+CARpoly_tidy <- tidy_CARpoly(CARpoly_raw)
+
+# categorize numeric variables
+cell_tidy <- categorize_vars_cell_tidy(cell_tidy)
+cell_untidy <- categorize_vars_cell_untidy(median_cell)
+
+muni_tidy <- categorize_vars_muni_tidy(muni_tidy)
+muni_untidy <- categorize_vars_muni_untidy(median_muni)
+
+
+CARpoly_tidy <- categorize_vars_CARpoly_tidy(CARpoly_tidy) %>% delete_cols_CARpoly_tidy()
+CARpoly_untidy <- categorize_vars_CARpoly_untidy(CARpoly_raw) 
+# change rename cols and delete unnecessary cols
+CARpoly_untidy <- CARpoly_untidy %>% rename_cols_CARpoly_untidy() %>%
+                                    delete_cols_CARpoly_untidy()
+
+# categorize as new or old or neither in planted soy age (so far only have it for cell scale)
+cell_tidy <- cell_tidy %>% cell_categorize_soy_age()
+cell_untidy <- cell_untidy %>% cell_categorize_soy_age()
+
+# Criteria 1: R2 of OLS model at each observation scale ----------------------------------------------------------
+
+# Run OLS model with (1) all data points, (2) year, onset, lat, lon, for (3) the chosen onset, (4) at each observation scale (cell 25km, CARpoly, muni) and (5) each planting percentile
 # Return R2 for each observation scale
 
-# Criteria 2:
+model_CARpoly_median <- lm(plant_median ~ onset + year + latitude + longitude + intensity, data = CARpoly_tidy)
+model_CARpoly_percentile5 <- lm(plant_percentile5 ~ onset + year + latitude + longitude + intensity, data = CARpoly_tidy)
+model_CARpoly_percentile95 <- lm(plant_percentile95 ~ onset + year + latitude + longitude + intensity, data = CARpoly_tidy)
+
+model_cell_median <- lm(plant_median ~ onset + year + latitude + longitude + intensity, data = cell_tidy)
+model_cell_percentile5 <- lm(plant_percentile5 ~ onset + year + latitude + longitude + intensity, data = cell_tidy)
+model_cell_percentile95 <- lm(plant_percentile95 ~ onset + year + latitude + longitude + intensity, data = cell_tidy)
+
+model_muni_median <- lm(plant_median ~ onset + year + latitude + longitude + intensity, data = muni_tidy)
+model_muni_percentile5 <- lm(plant_percentile5 ~ onset + year + latitude + longitude + intensity, data = muni_tidy)
+model_muni_percentile95 <- lm(plant_percentile95 ~ onset + year + latitude + longitude + intensity, data = muni_tidy)
+
+R2_CARpoly_median <- summary(model_CARpoly_median)$r.squared
+R2_CARpoly_percentile5 <- summary(model_CARpoly_percentile5)$r.squared
+R2_CARpoly_percentile95 <- summary(model_CARpoly_percentile95)$r.squared
+
+R2_cell_median <- summary(model_cell_median)$r.squared
+R2_cell_percentile5 <- summary(model_cell_percentile5)$r.squared
+R2_cell_percentile95 <- summary(model_cell_percentile95)$r.squared
+
+R2_muni_median <- summary(model_muni_median)$r.squared
+R2_muni_percentile5 <- summary(model_muni_percentile5)$r.squared
+R2_muni_percentile95 <- summary(model_muni_percentile95)$r.squared
+
+print(paste('R2 for median (CARpoly, cell, and muni):', R2_CARpoly_median, R2_cell_median, R2_muni_median))
+print(paste('R2 for percentile5 (CARpoly, cell, and muni):', R2_CARpoly_percentile5, R2_cell_percentile5, R2_muni_percentile5))
+print(paste('R2 for percentile95 (CARpoly, cell, and muni):', R2_CARpoly_percentile95, R2_cell_percentile95, R2_muni_percentile95))
+
+# Criteria 2: variability of planting date
+for (intensity in c('SC', 'DC')) {
+  for (percentile in c('plant_median', 'plant_percentile5', 'plant_percentile95')) {
+    sd_CARpoly = sd(CARpoly_tidy[CARpoly_tidy$intensity == intensity, percentile], na.rm = TRUE)
+    sd_cell = sd(cell_tidy[cell_tidy$intensity == intensity, percentile], na.rm = TRUE)
+    sd_muni = sd(muni_tidy[muni_tidy$intensity == intensity, percentile], na.rm = TRUE)
+    
+    print('--------------------')
+    print(percentile)
+    print(intensity)
+    print(paste('CAR poly', intensity, percentile, 'planting date std: ', sd_CARpoly))
+    print(paste('cell', intensity, percentile, 'planting date std: ', sd_cell))
+    print(paste('muni', intensity, percentile, 'planting date std: ', sd_muni))
+  }
+}
 
 ```
 
-Plot planting date, aggregated to cell, carpoly and muni scales
+Plot median planting date, aggregated to cell, carpoly and muni scales
+
+TO DO
+NOTE, DO MUNI AND CARPOLY EXTRACTIONS AND THEN MAP. MAYBE ZOOM IN ON A REGION FOR CARPOLY?
 
 ```{r}
 
+year_oi <- 2012 # to map
+intensity_oi <- "DC" # to map
+
+# import spatial data. Need csv format for cell_ID ---------------------------------------------------
+median_cell_raw <- read.csv(paste0(first_folder, '/R-code2/Modeling/data/median_onset_cell_v2.csv'))
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+
+cell_sf <- st_read(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/median_onset_cell'), layer = 'median_onset_cell_SHP')
+
+# add cell_ID
+clean_cell_ID <- function(cell_ID) {
+  strsplit(cell_ID, "_")[[1]][2]
+}
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# clean spatial data ----------------------------------------------------------------
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            #tidy_by_intensity_delay("SC_delay", "DC_delay") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest))
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+
+
+# filter a specific year
+cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi) %>%
+                                   filter(intensity == intensity_oi)
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = plant), colour = NA) +
+  scale_fill_viridis() +
+  ggtitle(paste("Median planting date", year_oi, intensity_oi)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
 
 ```
 
-Choose predictors
+Choose predictors, using all data points and only cell scale and the chosen onset definition
+
+TO DO 
+EXTRACT ONSET_HISTORICALRANGE AND TEST
 
 ```{r}
 
-# Only OLS prediction, using all data points
+# import data -----------------------------------------------------------------------------------------------
+if (onset_type != 'Gabriel_onset') {
+  filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                            '/median_onset_cell_', onset_type, '.csv')
+  filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                                 '/percentile5_onset_cell_', onset_type, '.csv')
+  filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                                  '/percentile25_onset_cell_', onset_type, '.csv')
+
+  filename_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
+  layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
+  
+  median_cell_raw <- read.csv(filename_median)
+  percentile5_cell_raw <- read.csv(filename_percentile5)
+  percentile25_cell_raw <- read.csv(filename_percentile25)
+  
+  cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+}
+
+if (onset_type == 'Gabriel_onset') {
+  median_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/median_onset_cell_v3.csv'))
+  percentile5_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile5_onset_cell_v3.csv'))
+  percentile25_cell_raw <- read.csv(paste0(first_folder,'/R-code2/Modeling/data/percentile25_onset_cell_v3.csv'))
+  
+  cell_sf <- st_read(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/median_onset_cell_v3'), layer = 'median_onset_cell_SHP_v3')
+}
+
+# clean data --------------------------------------------------------------------------------------------
+
+# csv data 
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                    rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+
+# sf data 
+
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+
+cell_sf_percentile25 <- cell_sf
+cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+
+# Only OLS prediction, using all data points -------------------------------------------------------------------
 
 # Choose from the following pool: onset, year, intensity, lat, lon, age of soy, region, range of historical onset from 2004 to 2014, onset:intensity, percentile, onset:percentile, onset:year, onset:lat, onset:lon and maybe other interactions
 
-# With onset fixed as one of the predictors, add stepwise according to adj R2 and partial F test
+# Method 1: build a semi-constrained stepwise regression based on AIC
+base_model <- lm(plant ~ onset, data = cell_sf_tidy)
+selected_model_AIC <- step(base_model, scope=list(upper = ~ 0+onset + year_index + intensity + lat + lon +  region +
+                                                plant_stat_type + onset:intensity + onset:plant_stat_type +
+                                                onset:lat + onset:lon, lower = ~ 0+onset), direction = 'forward', trace = FALSE)
+print('selected OLS model using AIC')
+summary(selected_model_AIC)
+
+# Method 2: add stepwise according to adj R2 and partial F test
+
+do_lm <- function(data, y.var,  x.vars, mask.soy.area) {
+
+  # x.vars = vector of predictors, names of variables are in quotes, and interactions as will be written in the lm formula, e.g. onset:latitude
+  # mask.soy.area = TRUE or FALSE, if TRUE take out rows with total soy area below min_soy_area
+  
+  # get rid of observations with low soy area
+  data.subset <- if(mask.soy.area) {
+    data[data$soy_area_k >= min_soy_area,]
+  }
+  
+  # define the formula --------------------------------------------------------------------------------------
+  # define the basic formula
+  formula.string <- paste(y.var, paste(x.vars, collapse = " + "), sep = " ~ ")
+  
+  f <- as.formula(formula.string)
+
+  # do the model ----------------------------------------------------------------------------------------
+  # evaluate model. note, simpler alternative: model <- lm(f, data = data.subset)
+  model <- eval(bquote(   lm(.(f), data = data.subset)   ))
+  
+  return(model)
+}
+
+# given an initial model, step through potential new predictors and pick the best one. 
+add_predictor_stepwise <- function(data, initial.predictors, y.var, new.predictors, mask.soy.area) {
+  
+  # given an initial set of predictors, add another one based on adj R2
+  # interactions to explore are in new.predictors
+  
+  # calculate adj R2 of initial model
+  initial_model <- do_lm(data = data, 
+              y.var = y.var, 
+              x.vars = initial.predictors,
+              mask.soy.area = mask.soy.area)
+  
+  initial_adjR2 <- summary(initial_model)$adj.r.squared
+  
+  # initialize 'best' new predictor and best adj_R2
+  best_new_predictor <- "none"
+  current_best_adjR2 <- initial_adjR2
+  
+  # initialize vector to store adj R2
+  new_adjR2s <- c(initial_adjR2)
+  
+  # loop through potential new predictors
+  for (predictor in new.predictors) {
+    
+    # calculate new adjR2 and save it
+    new_model <- do_lm(data = data, 
+              y.var = y.var, 
+              x.vars = c(initial.predictors, predictor), 
+              mask.soy.area = mask.soy.area)
+    
+    new_adjR2 <- summary(new_model)$adj.r.squared
+    new_adjR2s <- c(new_adjR2s, new_adjR2)
+    
+    # if new_adjR2 is better, update the new_best_predictor
+    if (new_adjR2 > current_best_adjR2) {
+      current_best_adjR2 <- new_adjR2
+      best_new_predictor <- predictor
+    }
+  }
+  
+  # return best predictor, its adjR2, and the list of other predictors' R2
+  all_adjR2 <- data.frame(model = c("initial", new.predictors), adjR2 = new_adjR2s)
+  
+  return(list(new_predictor = best_new_predictor, 
+              new_adjR2 = current_best_adjR2,  
+              adjR2_table = all_adjR2))
+}
+
+# runs add_predictor_stepwise to build the final model
+produce_model_stepwise <- function(data, initial.predictors, y.var, new.predictors,  mask.soy.area, max.predictors) {
+  # notes
+  # max.predictors = the max allowed number of predictors in the model
+  
+  model_finalized <- FALSE
+  iterations <- 0
+  
+  while (!model_finalized & iterations <= 10) {
+    
+    iterations <- iterations + 1
+    
+    # add a new predictor, save results
+    result <- add_predictor_stepwise(data, initial.predictors, y.var, 
+                       new.predictors, mask.soy.area)
+    
+    new_predictor <- result$new_predictor
+    new_adjR2_table <- result$adjR2_table
+    new_adjR2 <- result$new_adjR2
+
+    #print(new_adjR2_table)
+    
+    # check if the model returned 'none' or the max.predictors was reached; if so, model is finalized
+    # if model is finalized, return the model
+    if (new_predictor == "none" | length(initial.predictors) >= max.predictors) { 
+      model_finalized <- TRUE
+      
+      final_predictors <- initial.predictors
+      final_adjR2 <- new_adjR2
+      
+      # run the final model to return the lm output
+      final_model <- do_lm(data = data, 
+              y.var = y.var, 
+              x.vars = final_predictors, 
+              mask.soy.area = mask.soy.area)
+      
+    }
+    
+    # if model isn't done adding predictors, update initial.predictors for the new iteration
+    initial.predictors <- c(initial.predictors, new_predictor)
+    
+  }
+  
+  # return
+  return(list(final_model = final_model,
+              final_predictors = final_predictors,
+              final_adjR2 = final_adjR2))
+}
+
+
+new.predictors <- c('year_index', 'intensity', 'lat', 'lon', 'region', 'plant_stat_type', 'onset:intensity', 'onset:plant_stat_type', 'onset:lat', 'onset:lon') 
+
+selected_model_adjR2 <- produce_model_stepwise(data = cell_sf_tidy, initial.predictors = c('onset'), y.var = 'plant',
+                       new.predictors = new.predictors, mask.soy.area = TRUE, max.predictors = 6)
 
 # Return the top six predictors (and their p-values)
+print('top six predictors selected by adj R2')
+print(selected_model_adjR2$final_predictors)
 
+# run model with the top six predictors (onset, percentile, intensity, year, region, lat) along with the interaction variables
+# to compare the interaction variables with the different onset coefs when percentiles and intensities are fitted separately
+selected_OLS_model <- lm(plant ~ onset + plant_stat_type + intensity + year_index + region + lat + onset:plant_stat_type + onset:intensity, data = cell_sf_tidy)
+
+print('OLS with selected predictors + interesting interaction variables')
+print(summary(selected_OLS_model))
 ```
 
 
-Spatial and temporal autocorrelation
+Spatial and temporal autocorrelation (separate model for each intensity and percentile) - for all data
 
 ```{r}
 
 # for both OLS and FE, run model with chosen predictors and all data points (separated by intensity and percentile)
 
-# calculate temporal autocorrelation (Durbin-Watson) and map. Calculate percent of temporally autocorrelated cells after Bonferroni correction
+# initialize storage of 
+spatial_autocorr_alldata <- data.frame(model = character(0), year = numeric(0), p_value = numeric(0), 
+                                       moran_i = numeric(0), intensity = character(0), percentile = character(0))
 
-# calculate average spatial autocorrelation (Moran's I) across all years
+temp_autocorr_alldata <- data.frame(model = character(0), p_value = numeric(0), 
+                                       dw = numeric(0), intensity = character(0), percentile = character(0),
+                                    percent_autocorr = numeric(0))
 
-# sampling grid: size choice for both OLS and FE
+# OLS
+for (intensity in c('SC', 'DC')) {
+  for (percentile in c('median', 'percentile5', 'percentile25')) {
+    
+    # OLS
+    data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == intensity) & (cell_sf_tidy$plant_stat_type == percentile), ]
+    OLS_model = lm(plant ~ onset + year_index + region + lat, data = data_subset) 
+    
+    data_subset$residuals <- residuals(OLS_model)
+    
+    # temporal autocorrelation
+    data_subset_df <- data_subset
+
+    # filter out all cells where there isn't data for all years
+    st_geometry(data_subset_df) <- NULL
+    data_subset_df <- data_subset_df[complete.cases(data_subset_df),]
+    cells_list <- list()
+    i <- 1
+    for (year in 2004:2014) {
+       cells_in_year <- data_subset_df[data_subset_df$year == year,]
+       cells_list[[i]] <- cells_in_year$label
+       i <- i + 1
+    }
+    full_data_cells <- Reduce(intersect, cells_list)
+    data_subset_df<- data_subset_df[data_subset_df$label %in% full_data_cells, ]
+     
+    data_subset_df_nested <- group_by(data.frame(data_subset_df), label) %>% nest()
+     
+    dwtest_one_cell <- function(data) {
+      dwtest(residuals ~ 1, data = data)
+     }
+     
+    data_subset_df <- data_subset_df_nested %>%
+       mutate(dwtest = map(data, dwtest_one_cell)) %>%
+       mutate(test_df = map(dwtest, generics::tidy)) %>%
+       unnest(test_df)
+     
+    # calculate proportion of p values below 5% significance, with Bonferroni correction
+    
+    percent_tempauto <- mean(data_subset_df$p.value < 0.05/nrow(data_subset_df))
+    
+    temp_autocorr_alldata <- rbind(temp_autocorr_alldata, 
+                                   data.frame(model = "OLS", intensity = intensity, 
+                                              percentile = percentile, dw = mean(data_subset_df$statistic), 
+                                              p_value = mean(data_subset_df$p.value), 
+                                              percent_autocorr = percent_tempauto))
+
+    # spatial autocorrelation
+    for (year_oi in 2004:2014) {
+      # need 'one layer': one year, one intensity, set up weights
+      to_autocorrelation <- data_subset[data_subset$year == year_oi, ]
+      to_autocorrelation_sp <- as(to_autocorrelation, "Spatial")
+      st_geometry(to_autocorrelation) <- NULL # turn to_autocorrelation into data frame
+      centroids <- coordinates(to_autocorrelation_sp)
+      to_autocorrelation_points <- SpatialPointsDataFrame(coords = centroids, data = to_autocorrelation)
+      nb<-knn2nb(knearneigh(to_autocorrelation_points))
+      lw <- nb2listw(nb, zero.policy = TRUE)
+
+      # OLS: calculate spatial autocorrelation
+      moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, 500, zero.policy = TRUE)
+      residual_moran <- moran_residual$statistic
+      residual_moran_pval <- moran_residual$p.value
+
+      # save spatial autocorrelation information
+      spatial_autocorr_alldata <- rbind(spatial_autocorr_alldata,
+                                        data.frame(model = "OLS", year = year_oi,
+                                                   p_value = residual_moran_pval, moran_i = residual_moran,
+                                                   intensity = intensity, percentile = percentile))
+    }
+    
+  }
+}
+
+# FE
+for (intensity in c('SC', 'DC')) {
+  for (percentile in c('median', 'percentile5', 'percentile25')) {
+    
+    data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == intensity) & (cell_sf_tidy$plant_stat_type == percentile), ]
+    data_subset_panel <- pdata.frame(data_subset,index = c("cell_ID"))
+    FE_model <- plm(plant ~ onset + year_index, data =  data_subset_panel, model = "within")
+    
+    data_subset$residuals <- residuals(FE_model)
+    
+    # temporal autocorrelation
+    data_subset_df <- data_subset
+
+    # filter out all cells where there isn't data for all years
+    st_geometry(data_subset_df) <- NULL
+    data_subset_df <- data_subset_df[complete.cases(data_subset_df),]
+    cells_list <- list()
+    i <- 1
+    for (year in 2004:2014) {
+       cells_in_year <- data_subset_df[data_subset_df$year == year,]
+       cells_list[[i]] <- cells_in_year$label
+       i <- i + 1
+    }
+    full_data_cells <- Reduce(intersect, cells_list)
+    data_subset_df<- data_subset_df[data_subset_df$label %in% full_data_cells, ]
+     
+    data_subset_df_nested <- group_by(data.frame(data_subset_df), label) %>% nest()
+     
+    dwtest_one_cell <- function(data) {
+      dwtest(residuals ~ 1, data = data)
+     }
+     
+    data_subset_df <- data_subset_df_nested %>%
+       mutate(dwtest = map(data, dwtest_one_cell)) %>%
+       mutate(test_df = map(dwtest, generics::tidy)) %>%
+       unnest(test_df)
+     
+    # calculate proportion of p values below 5% significance, with Bonferroni correction
+    
+    percent_tempauto <- mean(data_subset_df$p.value < 0.05/nrow(data_subset_df))
+    
+    temp_autocorr_alldata <- rbind(temp_autocorr_alldata, 
+                                   data.frame(model = "FE", intensity = intensity, 
+                                              percentile = percentile, dw = mean(data_subset_df$statistic), 
+                                              p_value = mean(data_subset_df$p.value), 
+                                              percent_autocorr = percent_tempauto))
+
+    # spatial autocorrelation
+    for (year_oi in 2004:2014) {
+      # need 'one layer': one year, one intensity, set up weights
+      to_autocorrelation <- data_subset[data_subset$year == year_oi, ]
+      to_autocorrelation_sp <- as(to_autocorrelation, "Spatial")
+      st_geometry(to_autocorrelation) <- NULL # turn to_autocorrelation into data frame
+      centroids <- coordinates(to_autocorrelation_sp)
+      to_autocorrelation_points <- SpatialPointsDataFrame(coords = centroids, data = to_autocorrelation)
+      nb<-knn2nb(knearneigh(to_autocorrelation_points)) 
+      lw <- nb2listw(nb, zero.policy = TRUE)
+      
+      # calculate spatial autocorrelation
+      moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, 500, zero.policy = TRUE)
+      
+      residual_moran <- moran_residual$statistic
+      residual_moran_pval <- moran_residual$p.value
+      
+      # save spatial autocorrelation information
+      spatial_autocorr_alldata <- rbind(spatial_autocorr_alldata, 
+                                        data.frame(model = "FE", year = year_oi, 
+                                                   p_value = residual_moran_pval, moran_i = residual_moran,
+                                                   intensity = intensity, percentile = percentile))
+    }
+    
+  }
+}
+
+# summarize spatial correlation when all data points are retained
+morani_summary_alldata <- spatial_autocorr_alldata %>% 
+  group_by(model, intensity, percentile) %>%
+  dplyr::summarize(mean_moran_i = mean(moran_i), sd_moran_i = sd(moran_i))
+
+moran_pval_summary_alldata <- spatial_autocorr_alldata %>% 
+  group_by(model, intensity, percentile) %>%
+  dplyr::summarize(mean_pval = mean(p_value), sd_pval = sd(p_value))
+
+print('spatial autocorrelation when using all data')
+print(moran_pval_summary_alldata)
+
+print('temporal autocorrelation when using all data')
+print(temp_autocorr_alldata)
+
+```
+
+Spatial sampling for autocorrelation for OLS
+
+```{r}
+# sampling grid: size choice for OLS (no spatial sampling needed for FE)
 # for each sampling grid size (and offset), report spatial autocorrelation, prediction accuracy in new years and locations, percent total data used, coefficients' sensitivity to sampling grid position
 
-# return the best sampling grid size for the given onset/scale, for both OLS and FE
+# test different grid sizes and aggregation strategies. don't do any offset
+
+do_elim_year = TRUE # TOGGLE TRUE IF USE YEAR AS TREND, FALSE IF USE YEAR AS FIXED EFFECT
+
+results <- data.frame()
+
+for (grid_size in seq(0.5, 1.25, 0.25)) { # 0.25 to 1.75, seq(0.75, 1.25, 0.25)
+    for (lat_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
+      for (lon_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
+        
+        data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == intensity) & (cell_sf_tidy$plant_stat_type == percentile), ]
+        
+        model_output <- run_OLS(full_data = data_subset, 
+                              predictors = c("onset", "lat", "year_index", "region"), 
+                          y.var = "plant", plant_stat = percentile,
+                          grid_size = grid_size, 
+                          lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
+                          plot_samples = FALSE, plot_model_evals = FALSE, 
+                          year_oi = 2007,
+                          do_elim_year = do_elim_year,
+                          chosen_intensity = "DC")
+        
+        print(paste("grid size", grid_size))
+       
+        selected_output <- as.numeric(c(grid_size, lat_offset, lon_offset,
+                             model_output$onset_coef, 
+                             model_output$R2, model_output$percent_data_used, 
+                             model_output$residual_moran_pval, model_output$onset_moran_pval, 
+                             model_output$plant_moran_pval,
+                             mean(model_output$prediction_results_elimlocation$RMSE, na.rm = TRUE)
+                             ))
+        
+        if (do_elim_year) {
+          selected_output <- c(selected_output, mean(model_output$prediction_results_elimyear$RMSE, na.rm = TRUE))
+        }
+        
+        print(selected_output)
+        results <- rbind(results, selected_output)
+      }
+    }
+}
+
+if (do_elim_year) {
+  names(results) <- c("grid_size",  "lat_offset", "lon_offset", "onset_coef", 
+                    "R2", "percent_used", "residual_moran_pval", "onset_moran_pval",
+                    "plant_moran_pval",
+                    "mean_RMSE_elimlocation", "mean_RMSE_elimyear")
+}
+if (!do_elim_year) {
+  names(results) <- c("grid_size",  "lat_offset", "lon_offset", "onset_coef", 
+                    "R2", "percent_used", "residual_moran_pval", "onset_moran_pval",
+                    "plant_moran_pval",
+                    "mean_RMSE_elimlocation")
+}
+
+# SAVED RESULTS
+saveRDS(results, paste0("OLS_spatial_sampling_results_", onset_type, ".rds"))
+
+# calculate mean and sd for each grid size x agg scheme, for different grid offsets
+results_summary <- results %>%
+                        group_by(grid_size) %>%
+                        summarize(
+                          onset_coef_mean = mean(onset_coef),
+                          onset_coef_sd = sd(onset_coef),
+                          R2_mean = mean(R2), R2_sd = sd(R2),
+                          percent_used_mean = mean(percent_used),
+                          percent_used_sd = sd(percent_used),
+                          residual_moran_pval_mean = mean(residual_moran_pval),
+                          residual_moran_pval_sd = sd(residual_moran_pval),
+                          onset_moran_pval_mean = mean(onset_moran_pval),
+                          onset_moran_pval_sd = sd(onset_moran_pval),
+                          plant_moran_pval_mean = mean(plant_moran_pval),
+                          plant_moran_pval_sd = sd(plant_moran_pval),
+                          #RMSE_elimyear_mean = mean(mean_RMSE_elimyear), # TURN OFF IF USE YEAR AS FACTOR
+                          #RMSE_elimyear_sd = sd(mean_RMSE_elimyear), # TURN OFF IF USE YEAR AS FACTOR
+                          RMSE_elimlocation_mean = mean(mean_RMSE_elimlocation),
+                          RMSE_elimlocation_sd = sd(mean_RMSE_elimlocation)
+                        )
+
+if (do_elim_year) {
+  elim_year_summary <- results %>%
+    group_by(grid_size) %>%
+    summarize(
+      RMSE_elimyear_mean = mean(mean_RMSE_elimyear),
+      RMSE_elimyear_sd = sd(mean_RMSE_elimyear) 
+    )
+  
+  results_summary <- cbind(results_summary, elim_year_summary)
+}
 
 ```
 
@@ -71,6 +729,61 @@ Figures for choosing sampling grid size (grid size on x axis, and various metric
 
 ```{r}
 
+colnames(results_summary) <- make.unique(names(results_summary))
+
+# compare grid sizes
+plot_results_summary <- function(data, x_data, y_data, y_sd, x_label, y_label) {
+  ggplot(data, mapping = aes(x = x_data, y = y_data)) +
+    geom_line(data, mapping = aes(x = x_data, y = y_data)) +
+    geom_errorbar(aes(ymin=y_data-y_sd, ymax=y_data+y_sd), position=position_dodge(0.05)) +
+    ggtitle(y_label) +
+    xlab(x_label) +
+    ylab(y_label)+
+    theme_bw()
+}
+
+# plot results, summarizing for different grid offsets
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$onset_coef_mean,
+                     y_sd = results_summary$onset_coef_sd,
+                    x_label = "grid_size", y_label = "onset coefficient")
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$R2_mean,
+                     y_sd = results_summary$R2_sd,
+                    x_label = "grid_size", y_label = "R2")
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$percent_used_mean,
+                     y_sd = results_summary$percent_used_sd,
+                    x_label = "grid_size", y_label = "percent used")
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$residual_moran_pval_mean,
+                     y_sd = results_summary$residual_moran_pval_sd,
+                    x_label = "grid_size", y_label = "residual moran's I p value")
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$onset_moran_pval_mean,
+                     y_sd = results_summary$onset_moran_pval_sd,
+                    x_label = "grid_size", y_label = "onset moran's I p value")
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$plant_moran_pval_mean,
+                     y_sd = results_summary$plant_moran_pval_sd,
+                    x_label = "grid_size", y_label = "plant moran's I p value")
+
+plot_results_summary(data = results_summary, 
+                     x_data = results_summary$grid_size, y_data = results_summary$RMSE_elimlocation_mean,
+                     y_sd = results_summary$RMSE_elimlocation_sd,
+                    x_label = "grid_size", y_label = "RMSE from eliminating location")
+
+if (do_elim_year) {
+  plot_results_summary(data = results_summary, 
+                       x_data = results_summary$grid_size, y_data = results_summary$RMSE_elimyear_mean,
+                       y_sd = results_summary$RMSE_elimyear_sd,
+                      x_label = "grid_size", y_label = "RMSE from eliminating year")
+}
 
 ```
 
@@ -78,6 +791,21 @@ Figures for choosing sampling grid size (grid size on x axis, and various metric
 Map of sampling grid position, sampling grid size
 
 ```{r}
+
+chosen_grid_size = 0.75
+chosen_lat_offset = 0
+chosen_lon_offset = 0
+chosen_year_oi = 2014
+
+data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == "DC") & (cell_sf_tidy$plant_stat_type == "median"), ]
+
+model_output <- run_OLS(full_data = data_subset, predictors = c("onset", "lat", "year_index", "region"), 
+                          y.var = "plant", plant_stat = "median", grid_size = chosen_grid_size, 
+                          lat_offset = chosen_lat_offset, lon_offset = chosen_lon_offset, agg_scheme = FALSE, 
+                          plot_samples = TRUE, plot_model_evals = FALSE, 
+                          year_oi = chosen_year_oi,
+                          do_elim_year = FALSE,
+                          chosen_intensity = "DC")
 
 ```
 
@@ -87,6 +815,297 @@ Model type
 
 # for each OLS, FE and RF; and also for each intensity x percentile; and for each grid sampling offset, train and get prediction accuracy for (1) 70%/30% train-test split; (2) prediction at new years; (3) prediction at new locations
 
+test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size) {
+  
+  # eliminate a year and test it; model_type is ols or rf or fe
+  train_elimyear <- cell_df[cell_df$year != elim_year,]
+  valid_elimyear <- cell_df[cell_df$year == elim_year,]
+  
+  # for mapping
+  cell_sf_elimyear <- cell_sf[cell_sf$year == elim_year,]
+  
+  # fit model
+  if (model_type == "rf") {
+    model <- randomForest(f, data = train_elimyear, importance = TRUE, ntree = 500, mtry = 2)
+    
+    rmses_elimyear <- rmse(valid_elimyear$plant, predict(model, valid_elimyear))
+    errors_elimyear <- mean(predict(model, valid_elimyear) - valid_elimyear$plant)
+    lat_offsets <- 0 # placeholder
+    lon_offsets <- 0 # placeholder
+  }
+  
+  if (model_type == "ols") {
+    
+    lat_offsets <- numeric(0)
+    lon_offests <- numeric(0)
+    rmses_elimyear <- numeric(0)
+    errors_elimyear <- numeric(0)
+    
+    for (lat_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
+      for (lon_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
+        train_sampled <- get_sampled_data(full_data = train_elimyear, plant_stat = plant_stat, grid_size = grid_size, 
+                                   lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
+                                   plot_samples = FALSE, year_oi = 2012) # year_oi is for plotting only
+        model <- lm(f, data = train_sampled)
+        
+        rmse_elimyear <- rmse(valid_elimyear$plant, predict(model, valid_elimyear))
+        error_elimyear <- mean(predict(model, valid_elimyear) - valid_elimyear$plant)
+        
+        lat_offsets <- c(lat_offsets, lat_offset)
+        lon_offsets <- c(lon_offsets, lon_offset)
+        rmses_elimyear <- c(rmses_elimyear, rmse_elimyear)
+        errors_elimyear <- c(errors_elimyear, error_elimyear)
+      }
+    }
+    
+  }
+  
+  if (model_type == "fe") {
+    train_panel <- pdata.frame(train_elimyear,index = c("cell_ID"))
+    model <- plm(f, data =  train_panel, model = "within")
+    
+    rmses_elimyear <- rmse(valid_elimyear$plant, predict(model, valid_elimyear))
+      errors_elimyear <- mean(predict(model, valid_elimyear) - valid_elimyear$plant)
+  }
+
+  print('year done')
+  
+  return(data.frame(elim_year = elim_year,
+                    rmse_elimyear = rmses_elimyear,
+                    error_elimyear = errors_elimyear,
+                    lat_offset = lat_offsets,
+                    lon_offset = lon_offsets))
+
+}
+
+test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
+  
+  train_elimcell <- cell_df[cell_df$cell_ID != elim_cell,]
+  valid_elimcell <- cell_df[cell_df$cell_ID == elim_cell,]
+  
+  # for mapping
+  cell_sf_elimcell <- cell_sf[cell_sf$cell_ID == elim_cell, ]
+  
+  # fit model
+  if (model_type == "rf") {
+    model <- randomForest(f, data = train_elimcell, importance = TRUE, ntree = 600, mtry = 2)
+  }
+  
+  if (model_type == "ols") {
+    model <- lm(f, data = train_elimcell)
+  }
+
+  if (model_type == "fe") {
+    train_panel <- pdata.frame(train_elimcell,index = c("cell_ID"))
+    model <- plm(f, data =  train_panel, model = "within")
+  }
+  
+  valid_elimcell$predicted_plant <- predict(model, valid_elimcell)
+  
+  rmse_elimcell <- rmse(valid_elimcell$plant, valid_elimcell$predicted_plant)
+  error_elimcell <- mean(valid_elimcell$predicted_plant - valid_elimcell$plant)
+
+  print('cell done')
+  
+  return(data.frame(elim_cell = c(elim_cell),
+                    rmse_elimcell = c(rmse_elimcell),
+                    error_elimcell = c(error_elimcell)))
+}
+
+do_elimcell <- TRUE
+do_elimyear <- TRUE
+cell_reducer <- 10 # the number of cells by this when NOT sampling data and doing elimcell
+
+set.seed(100)
+wanted_variables <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity', 'plant', 'cell_ID')
+wanted_predictors <- c('year', 'lat', 'onset', 'region', 'intensity')
+f <- as.formula(paste('plant ~', paste(wanted_predictors, collapse = " + ")))
+
+chosen_percentile <- "percentile5"
+chosen_grid_size <- 0.75
+chosen_intensity <- "DC"
+
+# to store prediction results
+prediction_error_results <- data.frame(model_type = character(0),
+                                      elim_type = character(0),
+                                      elim_year = numeric(0),
+                                      elim_cell = character(0),
+                                      rmse = numeric(0),
+                                      error = numeric(0),
+                                      sampled_data = character(0))
+
+cell_sf <- cell_sf_tidy
+cell_df <- cell_sf_tidy
+st_geometry(cell_df) <- NULL
+
+cell_df <- cell_df[(cell_df$plant_stat_type == chosen_percentile) & (cell_df$intensity == chosen_intensity), wanted_variables]
+cell_df$intensity <- as.factor(cell_df$intensity)
+cell_df$region <- as.factor(cell_df$region)
+cell_sf <- cell_sf[(cell_sf$plant_stat_type == chosen_percentile)  & (cell_df$intensity == chosen_intensity), wanted_variables]
+
+# random forest: regular validaton, 30% randomly eliminated  ----------------------------------------------
+train_indeces <- sample(nrow(cell_df), 0.7*nrow(cell_df), replace = FALSE)
+train <- cell_df[train_indeces,]
+valid <- cell_df[-train_indeces,]
+  
+  rf_model1 <- randomForest(f, data = train, importance = TRUE, ntree = 600, mtry = 2)
+  valid$rf_predicted_plant <- predict(rf_model1, valid)
+  plot(valid$plant, valid$rf_predicted_plant, main = 'rf')
+  abline(a = 0, b = 1)
+
+  importance(rf_model1)
+  varImpPlot(rf_model1)
+
+  rf_rmse <- rmse(valid$plant, valid$rf_predicted_plant)
+  rf_error <- mean(valid$rf_predicted_plant - valid$plant)
+  
+  # save
+  prediction_error_results <- rbind(prediction_error_results,
+                                    
+                                data.frame(model_type = c('rf'),
+                                           elim_type = c('30%'),
+                                           elim_year = c(NA),
+                                           elim_cell = c(NA),
+                                           rmse = c(rf_rmse),
+                                           error = c(rf_error),
+                                           sampled_data = c(sample_data)))
+  
+  # random forest: eliminate year ---------------------------------------------------------------------------
+  if (do_elimyear) {
+    for (elim_year in 2004:2014) {
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "rf")
+  
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('rf'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                             sampled_data = c(sample_data)))
+      #print(result)
+    }
+  }
+
+  # random forest: eliminate cell -------------------------------------------------------------------------
+  unique_cells <- unique(cell_df[cell_df$year == 2004, "cell_ID"])
+  if (!sample_data) {
+    chosen_cells <- sample(unique_cells, length(unique_cells)/cell_reducer, replace = FALSE) # randomly select some unique cells, otherwise too much data
+  }
+  if (sample_data) {
+    chosen_cells <- unique_cells
+  }
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
+                                cell_sf$cell_ID %in% chosen_cells, ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
+
+  if (do_elimcell) {
+    for (elim_cell in chosen_cells) {
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "rf", f)
+  
+      # save
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('rf'),
+                                             elim_type = c('cell'),
+                                             elim_year = c(NA),
+                                             elim_cell = c(elim_cell),
+                                             rmse = c(result$rmse_elimcell),
+                                             error = c(result$error_elimcell),
+                                             sampled_data = c(sample_data)))
+  
+      # for mapping
+      cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+      }
+  
+    elimcell_error_map <- ggplot(cell_sf_elimcell) +
+      geom_sf(aes(fill = error)) +
+      scale_fill_viridis() +
+      ggtitle(paste("Random forest prediction error, eliminated individual cell")) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+  
+    print(elimcell_error_map)
+  }
+  
+  # ols: regular validaton, 30% randomly eliminated  ----------------------------------------------
+  
+  ols_model1 <- lm(f, data = train)
+  valid$ols_predicted_plant <- predict(ols_model1, valid)
+  plot(valid$plant, valid$ols_predicted_plant, main = 'ols')
+  abline(a = 0, b = 1)
+  
+  ols_rmse <- rmse(valid$plant, valid$ols_predicted_plant)
+  ols_error <- mean(valid$ols_predicted_plant - valid$plant)
+  
+  # save
+  prediction_error_results <- rbind(prediction_error_results,
+                                    
+                                data.frame(model_type = c('ols'),
+                                           elim_type = c('30%'),
+                                           elim_year = c(NA),
+                                           elim_cell = c(NA),
+                                           rmse = c(ols_rmse),
+                                           error = c(ols_error),
+                                           sampled_data = c(sample_data)))
+  
+  # ols: eliminate year -----------------------------------------------------------------------------
+  
+  if (do_elimyear) {
+    for (elim_year in 2004:2014) {
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "ols")
+      prediction_error_results <- rbind(prediction_error_results,
+                                      
+                                  data.frame(model_type = c('ols'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                             sampled_data = c(sample_data)))
+       
+      # print(result)
+    }
+  }
+
+  
+  # ols: eliminate cell -------------------------------------------------------------------------
+  # chosen_cells was defined at rf's eliminate cell section
+  cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
+                                cell_sf$cell_ID %in% chosen_cells, ] # to store error values
+  cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
+
+  if (do_elimcell) {
+    for (elim_cell in chosen_cells) {
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "ols", f)
+  
+      # save
+      prediction_error_results <- rbind(prediction_error_results,
+  
+                                  data.frame(model_type = c('ols'),
+                                             elim_type = c('cell'),
+                                             elim_year = c(NA),
+                                             elim_cell = c(elim_cell),
+                                             rmse = c(result$rmse_elimcell),
+                                             error = c(result$error_elimcell),
+                                             sampled_data = c(sample_data)))
+  
+      # print(result)
+  
+      # for mapping
+      cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
+    }
+  
+    elimcell_error_map <- ggplot(cell_sf_elimcell) +
+      geom_sf(aes(fill = error)) +
+      scale_fill_viridis() +
+      ggtitle(paste("OLS prediction error, eliminated individual cell")) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+  
+    print(elimcell_error_map)
+  }
 # Hausmann test for OLS vs FE
 
 ```
