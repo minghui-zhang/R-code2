@@ -24,6 +24,7 @@ library(spdep)
 library(plm)
 library(lmtest)
 library(Metrics)
+library(randomForest)
 
 # select the onset definition
 onset_type <- 'freq_10_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
@@ -812,14 +813,12 @@ model_output <- run_OLS(full_data = data_subset, predictors = c("onset", "lat", 
 Model type
 
 ```{r}
-
-# for each OLS, FE and RF; and also for each intensity x percentile; and for each grid sampling offset, train and get prediction accuracy for (1) 70%/30% train-test split; (2) prediction at new years; (3) prediction at new locations
-
-test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size) {
+test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size, plant_stat) {
   
   # eliminate a year and test it; model_type is ols or rf or fe
   train_elimyear <- cell_df[cell_df$year != elim_year,]
   valid_elimyear <- cell_df[cell_df$year == elim_year,]
+  train_sf_elimyear <- cell_sf[cell_sf$year != elim_year,] # for ols sampling
   
   # for mapping
   cell_sf_elimyear <- cell_sf[cell_sf$year == elim_year,]
@@ -837,13 +836,13 @@ test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size)
   if (model_type == "ols") {
     
     lat_offsets <- numeric(0)
-    lon_offests <- numeric(0)
+    lon_offsets <- numeric(0)
     rmses_elimyear <- numeric(0)
     errors_elimyear <- numeric(0)
     
-    for (lat_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
-      for (lon_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
-        train_sampled <- get_sampled_data(full_data = train_elimyear, plant_stat = plant_stat, grid_size = grid_size, 
+    for (lat_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+      for (lon_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+        train_sampled <- get_sampled_data(full_data = train_sf_elimyear, plant_stat = plant_stat, grid_size = grid_size, 
                                    lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
                                    plot_samples = FALSE, year_oi = 2012) # year_oi is for plotting only
         model <- lm(f, data = train_sampled)
@@ -861,11 +860,26 @@ test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size)
   }
   
   if (model_type == "fe") {
-    train_panel <- pdata.frame(train_elimyear,index = c("cell_ID"))
-    model <- plm(f, data =  train_panel, model = "within")
+    train_elimyear_panel <- pdata.frame(train_elimyear,index = c("cell_ID"))
+    valid_elimyear_panel <- pdata.frame(valid_elimyear, index = c("cell_ID"))
     
-    rmses_elimyear <- rmse(valid_elimyear$plant, predict(model, valid_elimyear))
-      errors_elimyear <- mean(predict(model, valid_elimyear) - valid_elimyear$plant)
+    fe_model <- plm(f_fe, data =  train_elimyear_panel, model = "within")
+    fixed_effects <- fixef(fe_model)
+    fe_df <- data.frame(fixef_cell_ID = names(fixed_effects), 
+                        fixef = as.numeric(fixed_effects))
+    
+    # ensures that rows are in same order as valid
+    temp <- dplyr::left_join(valid_elimyear, fe_df, by = c("cell_ID" = "fixef_cell_ID"))
+    
+    # get only the cells that have fixed effects predicted
+    has_fe_indeces <- which(!is.na(temp$fixef))
+    prediction <- temp$fixef + fe_model$coefficients['year'] * valid_elimyear$year +  fe_model$coefficients['onset'] * valid_elimyear$onset
+    
+    # get only the cells that have fixed effects predicted
+    rmses_elimyear <- rmse(valid_elimyear$plant[has_fe_indeces], prediction[has_fe_indeces])
+    errors_elimyear <- mean(prediction[has_fe_indeces] - valid_elimyear$plant[has_fe_indeces])
+    lat_offsets <- 0 # placeholder
+    lon_offsets <- 0 # placeholder
   }
 
   print('year done')
@@ -878,10 +892,11 @@ test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size)
 
 }
 
-test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
+test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f, grid_size, plant_stat) {
   
   train_elimcell <- cell_df[cell_df$cell_ID != elim_cell,]
   valid_elimcell <- cell_df[cell_df$cell_ID == elim_cell,]
+  train_sf_elimcell <- cell_sf[cell_sf$cell_ID != elim_cell,]
   
   # for mapping
   cell_sf_elimcell <- cell_sf[cell_sf$cell_ID == elim_cell, ]
@@ -889,28 +904,61 @@ test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f) {
   # fit model
   if (model_type == "rf") {
     model <- randomForest(f, data = train_elimcell, importance = TRUE, ntree = 600, mtry = 2)
+    
+    rmses_elimcell <- rmse(valid_elimcell$plant, predict(model, valid_elimcell))
+    errors_elimcell <- mean(predict(model, valid_elimcell) - valid_elimcell$plant)
+    lat_offsets <- 0 # placeholder
+    lon_offsets <- 0 # placeholder
   }
   
   if (model_type == "ols") {
-    model <- lm(f, data = train_elimcell)
+    lat_offsets <- numeric(0)
+    lon_offsets <- numeric(0)
+    rmses_elimcell <- numeric(0)
+    errors_elimcell <- numeric(0)
+    
+    for (lat_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+      for (lon_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+        train_sampled <- get_sampled_data(full_data = train_sf_elimcell, plant_stat = plant_stat, grid_size = grid_size, 
+                                   lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
+                                   plot_samples = FALSE, year_oi = 2012) # year_oi is for plotting only
+        model <- lm(f, data = train_sampled)
+        
+        rmse_elimcell <- rmse(valid_elimcell$plant, predict(model, valid_elimcell))
+        error_elimcell <- mean(predict(model, valid_elimcell) - valid_elimcell$plant)
+        
+        lat_offsets <- c(lat_offsets, lat_offset)
+        lon_offsets <- c(lon_offsets, lon_offset)
+        rmses_elimcell <- c(rmses_elimcell, rmse_elimcell)
+        errors_elimcell <- c(errors_elimcell, error_elimcell)
+      }
+    }
+    
   }
 
   if (model_type == "fe") {
     train_panel <- pdata.frame(train_elimcell,index = c("cell_ID"))
     model <- plm(f, data =  train_panel, model = "within")
+    
+    rmses_elimcell <- rmse(valid_elimcell$plant, predict(model, valid_elimcell))
+    errors_elimcell <- mean(predict(model, valid_elimcell) - valid_elimcell$plant)
   }
   
-  valid_elimcell$predicted_plant <- predict(model, valid_elimcell)
-  
-  rmse_elimcell <- rmse(valid_elimcell$plant, valid_elimcell$predicted_plant)
-  error_elimcell <- mean(valid_elimcell$predicted_plant - valid_elimcell$plant)
-
   print('cell done')
   
-  return(data.frame(elim_cell = c(elim_cell),
-                    rmse_elimcell = c(rmse_elimcell),
-                    error_elimcell = c(error_elimcell)))
+  return(data.frame(elim_cell = elim_cell,
+                    rmse_elimcell = rmses_elimcell,
+                    error_elimcell = errors_elimcell,
+                    lat_offset = lat_offsets,
+                    lon_offset = lon_offsets))
 }
+
+
+```
+
+```{r}
+
+# for each OLS, FE and RF; and also for each intensity x percentile; and for each grid sampling offset, train and get prediction accuracy for (1) 70%/30% train-test split; (2) prediction at new years; (3) prediction at new locations
 
 do_elimcell <- TRUE
 do_elimyear <- TRUE
@@ -918,12 +966,23 @@ cell_reducer <- 10 # the number of cells by this when NOT sampling data and doin
 
 set.seed(100)
 wanted_variables <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity', 'plant', 'cell_ID')
-wanted_predictors <- c('year', 'lat', 'onset', 'region', 'intensity')
+wanted_predictors <- c('year', 'lat', 'onset', 'region') # for ols and rf
+wanted_predictors_fe <- c('year', 'onset') # for fe
 f <- as.formula(paste('plant ~', paste(wanted_predictors, collapse = " + ")))
+f_fe <- as.formula(paste('plant ~', paste(wanted_predictors_fe, collapse = " + ") ))
 
+# NOTE, SEPARATE MODELS FOR EACH PERCENTILE AND INTENSITY
 chosen_percentile <- "percentile5"
 chosen_grid_size <- 0.75
 chosen_intensity <- "DC"
+
+cell_sf <- cell_sf_tidy
+cell_df <- cell_sf_tidy
+st_geometry(cell_df) <- NULL
+
+cell_df <- cell_df[(cell_df$plant_stat_type == chosen_percentile) & (cell_df$intensity == chosen_intensity), ]
+cell_df$region <- as.factor(cell_df$region)
+cell_sf <- cell_sf[(cell_sf$plant_stat_type == chosen_percentile)  & (cell_df$intensity == chosen_intensity), ]
 
 # to store prediction results
 prediction_error_results <- data.frame(model_type = character(0),
@@ -932,48 +991,36 @@ prediction_error_results <- data.frame(model_type = character(0),
                                       elim_cell = character(0),
                                       rmse = numeric(0),
                                       error = numeric(0),
-                                      sampled_data = character(0))
-
-cell_sf <- cell_sf_tidy
-cell_df <- cell_sf_tidy
-st_geometry(cell_df) <- NULL
-
-cell_df <- cell_df[(cell_df$plant_stat_type == chosen_percentile) & (cell_df$intensity == chosen_intensity), wanted_variables]
-cell_df$intensity <- as.factor(cell_df$intensity)
-cell_df$region <- as.factor(cell_df$region)
-cell_sf <- cell_sf[(cell_sf$plant_stat_type == chosen_percentile)  & (cell_df$intensity == chosen_intensity), wanted_variables]
+                                      lat_offset = numeric(0),
+                                      lon_offset = numeric(0))
 
 # random forest: regular validaton, 30% randomly eliminated  ----------------------------------------------
 train_indeces <- sample(nrow(cell_df), 0.7*nrow(cell_df), replace = FALSE)
 train <- cell_df[train_indeces,]
+train_sf <- cell_sf[train_indeces,]
 valid <- cell_df[-train_indeces,]
   
-  rf_model1 <- randomForest(f, data = train, importance = TRUE, ntree = 600, mtry = 2)
-  valid$rf_predicted_plant <- predict(rf_model1, valid)
-  plot(valid$plant, valid$rf_predicted_plant, main = 'rf')
-  abline(a = 0, b = 1)
+rf_model1 <- randomForest(f, data = train, importance = TRUE, ntree = 600, mtry = 2)
+valid$rf_predicted_plant <- predict(rf_model1, valid)
 
-  importance(rf_model1)
-  varImpPlot(rf_model1)
-
-  rf_rmse <- rmse(valid$plant, valid$rf_predicted_plant)
-  rf_error <- mean(valid$rf_predicted_plant - valid$plant)
+rf_rmse <- rmse(valid$plant, valid$rf_predicted_plant)
+rf_error <- mean(valid$rf_predicted_plant - valid$plant)
   
-  # save
-  prediction_error_results <- rbind(prediction_error_results,
-                                    
+# save
+prediction_error_results <- rbind(prediction_error_results,
                                 data.frame(model_type = c('rf'),
                                            elim_type = c('30%'),
                                            elim_year = c(NA),
                                            elim_cell = c(NA),
                                            rmse = c(rf_rmse),
                                            error = c(rf_error),
-                                           sampled_data = c(sample_data)))
+                                           lat_offset = 0,
+                                           lon_offset = 0))
   
-  # random forest: eliminate year ---------------------------------------------------------------------------
+# random forest: eliminate year ---------------------------------------------------------------------------
   if (do_elimyear) {
     for (elim_year in 2004:2014) {
-      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "rf")
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "rf", grid_size = chosen_grid_size, plant_stat = chosen_percentile)
   
       prediction_error_results <- rbind(prediction_error_results,
   
@@ -983,26 +1030,24 @@ valid <- cell_df[-train_indeces,]
                                              elim_cell = c(NA),
                                              rmse = c(result$rmse_elimyear),
                                              error = c(result$error_elimyear),
-                                             sampled_data = c(sample_data)))
+                                            lat_offset = 0,
+                                            lon_offset = 0))
       #print(result)
     }
   }
 
   # random forest: eliminate cell -------------------------------------------------------------------------
   unique_cells <- unique(cell_df[cell_df$year == 2004, "cell_ID"])
-  if (!sample_data) {
-    chosen_cells <- sample(unique_cells, length(unique_cells)/cell_reducer, replace = FALSE) # randomly select some unique cells, otherwise too much data
-  }
-  if (sample_data) {
-    chosen_cells <- unique_cells
-  }
+
+  chosen_cells <- sample(unique_cells, length(unique_cells)/cell_reducer, replace = FALSE) # randomly select some unique cells, otherwise too much data
+
   cell_sf_elimcell <- cell_sf[cell_sf$year == 2004 & cell_sf$intensity == "DC" &
                                 cell_sf$cell_ID %in% chosen_cells, ] # to store error values
   cell_sf_elimcell$error <- rep(NA, nrow(cell_sf_elimcell))  # to store errors
 
   if (do_elimcell) {
     for (elim_cell in chosen_cells) {
-      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "rf", f)
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "rf", f, grid_size = chosen_grid_size)
   
       # save
       prediction_error_results <- rbind(prediction_error_results,
@@ -1013,7 +1058,8 @@ valid <- cell_df[-train_indeces,]
                                              elim_cell = c(elim_cell),
                                              rmse = c(result$rmse_elimcell),
                                              error = c(result$error_elimcell),
-                                             sampled_data = c(sample_data)))
+                                            lat_offset = 0,
+                                            lon_offset = 0))
   
       # for mapping
       cell_sf_elimcell[cell_sf_elimcell$cell_ID == elim_cell, "error"] <- result$error_elimcell[1]
@@ -1031,30 +1077,44 @@ valid <- cell_df[-train_indeces,]
   
   # ols: regular validaton, 30% randomly eliminated  ----------------------------------------------
   
-  ols_model1 <- lm(f, data = train)
-  valid$ols_predicted_plant <- predict(ols_model1, valid)
-  plot(valid$plant, valid$ols_predicted_plant, main = 'ols')
-  abline(a = 0, b = 1)
-  
-  ols_rmse <- rmse(valid$plant, valid$ols_predicted_plant)
-  ols_error <- mean(valid$ols_predicted_plant - valid$plant)
+  lat_offsets <- numeric(0)
+  lon_offsets <- numeric(0)
+  rmses <- numeric(0)
+  errors <- numeric(0)
+    
+  for (lat_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+    for (lon_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+        train_sampled <- get_sampled_data(full_data = train_sf, plant_stat = chosen_percentile, grid_size = chosen_grid_size, 
+                                   lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
+                                   plot_samples = FALSE, year_oi = 2012) # year_oi is for plotting only
+        ols_model <- lm(f, data = train_sampled)
+        
+        rmse <- rmse(valid$plant, predict(ols_model, valid))
+        error <- mean(predict(ols_model, valid) - valid$plant)
+        
+        lat_offsets <- c(lat_offsets, lat_offset)
+        lon_offsets <- c(lon_offsets, lon_offset)
+        rmses <- c(rmses, rmse)
+        errors <- c(errors, error)
+      }
+  }
   
   # save
   prediction_error_results <- rbind(prediction_error_results,
-                                    
                                 data.frame(model_type = c('ols'),
                                            elim_type = c('30%'),
                                            elim_year = c(NA),
                                            elim_cell = c(NA),
-                                           rmse = c(ols_rmse),
-                                           error = c(ols_error),
-                                           sampled_data = c(sample_data)))
+                                           rmse = rmses,
+                                           error = errors,
+                                           lat_offset = lat_offsets,
+                                           lon_offset = lon_offsets))
   
   # ols: eliminate year -----------------------------------------------------------------------------
   
   if (do_elimyear) {
     for (elim_year in 2004:2014) {
-      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "ols")
+      result <- test_elimyear(elim_year, cell_df, cell_sf, f, "ols", grid_size = chosen_grid_size, plant_stat = chosen_percentile)
       prediction_error_results <- rbind(prediction_error_results,
                                       
                                   data.frame(model_type = c('ols'),
@@ -1063,8 +1123,8 @@ valid <- cell_df[-train_indeces,]
                                              elim_cell = c(NA),
                                              rmse = c(result$rmse_elimyear),
                                              error = c(result$error_elimyear),
-                                             sampled_data = c(sample_data)))
-       
+                                            lat_offset = result$lat_offset,
+                                            lon_offset = result$lon_offset))
       # print(result)
     }
   }
@@ -1078,7 +1138,7 @@ valid <- cell_df[-train_indeces,]
 
   if (do_elimcell) {
     for (elim_cell in chosen_cells) {
-      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "ols", f)
+      result <- test_elimcell(elim_cell, cell_df, cell_sf, model_type = "ols", f, grid_size = chosen_grid_size, plant_stat = chosen_percentile)
   
       # save
       prediction_error_results <- rbind(prediction_error_results,
@@ -1089,7 +1149,8 @@ valid <- cell_df[-train_indeces,]
                                              elim_cell = c(elim_cell),
                                              rmse = c(result$rmse_elimcell),
                                              error = c(result$error_elimcell),
-                                             sampled_data = c(sample_data)))
+                                            lat_offset = result$lat_offset,
+                                            lon_offset = result$lon_offset))
   
       # print(result)
   
@@ -1106,7 +1167,62 @@ valid <- cell_df[-train_indeces,]
   
     print(elimcell_error_map)
   }
-# Hausmann test for OLS vs FE
+
+# fe validation, elimiante random 30% -----------------------------------------------------------------
+train_panel <- pdata.frame(train, index = c("cell_ID"))
+
+fe_model <- plm(f_fe, data =  train_panel, model = "within")
+fixed_effects <- fixef(fe_model)
+fe_df <- data.frame(fixef_cell_ID = names(fixed_effects), fixef = as.numeric(fixed_effects))
+
+temp <- dplyr::left_join(valid, fe_df, by = c("cell_ID" = "fixef_cell_ID")) # ensures that rows are in same order as valid
+
+# get only the cells that have fixed effects predicted
+has_fe_indeces <- which(!is.na(temp$fixef))
+
+prediction <- temp$fixef + fe_model$coefficients['year'] * valid$year +  
+              fe_model$coefficients['onset'] * valid$onset
+
+# get only the cells that have fixed effects predicted
+
+fe_rmse <- rmse(valid$plant[has_fe_indeces], prediction[has_fe_indeces])
+fe_error <- mean(prediction[has_fe_indeces] - valid$plant[has_fe_indeces])
+
+# save
+prediction_error_results <- rbind(prediction_error_results,
+                                data.frame(model_type = c('fe'),
+                                           elim_type = c('30%'),
+                                           elim_year = c(NA),
+                                           elim_cell = c(NA),
+                                           rmse = c(fe_rmse),
+                                           error = c(fe_error),
+                                           lat_offset = 0,
+                                           lon_offset = 0))
+    
+# fe: elimyear validaton ----------------------------------------------
+
+if (do_elimyear) {
+  for (elim_year in 2004:2014) {
+      
+    result <- test_elimyear(elim_year, cell_df, cell_sf, f_fe, "fe", grid_size = chosen_grid_size, plant_stat = chosen_percentile)
+    prediction_error_results <- rbind(prediction_error_results,
+                                      
+                                  data.frame(model_type = c('fe'),
+                                             elim_type = c('year'),
+                                             elim_year = c(elim_year),
+                                             elim_cell = c(NA),
+                                             rmse = c(result$rmse_elimyear),
+                                             error = c(result$error_elimyear),
+                                            lat_offset = result$lat_offset,
+                                            lon_offset = result$lon_offset))
+      # print(result)
+  }
+}
+
+prediction_error_results$intensity <- chosen_intensity
+prediction_error_results$percentile <- chosen_percentile
+
+saveRDS(prediction_error_results, paste0("prediction_error_results_", onset_type, '_', chosen_intensity, '_', chosen_percentile, ".rds"))
 
 ```
 
@@ -1114,17 +1230,97 @@ Plot of prediction accuracy metrics for each model type
 
 ```{r}
 
+# REPEAT FOR EACH INTENSITY AND PERCENTILE
+
+imported_prediction_error <- readRDS('prediction_error_results_freq_10_persiann_DC_percentile5.rds')
+
 # rmse vs eliminated year, summarized for different intensities and percentiles and sampling grid locations
+
+elimyear_results <- imported_prediction_error[imported_prediction_error$elim_type == "year",]
+elimyear_rf_fe <- elimyear_results[elimyear_results$model_type == 'rf' | elimyear_results$model_type == 'fe',]
+summarized_elimyear_rf_fe <- elimyear_rf_fe[, c('elim_year', 'rmse', 'error')]
+summarized_elimyear_rf_fe$rmse_sd <- 0
+summarized_elimyear_rf_fe$error_sd <- 0
+summarized_elimyear_rf_fe$model_type <- elimyear_rf_fe$model_type
+colnames(summarized_elimyear_rf_fe) <- c('elim_year', 'rmse_mean', 'error_mean', 'rmse_sd', 'error_sd', 'model_type')
+
+elimyear_ols <- elimyear_results[elimyear_results$model_type == 'ols',]
+
+summarized_elimyear_ols <- elimyear_ols %>% 
+  group_by(elim_year) %>% 
+  dplyr::summarize(rmse_mean = mean(rmse),
+                   error_mean = mean(error),
+                   rmse_sd = sd(rmse),
+                   error_sd = sd(error)) %>%
+  mutate(model_type = 'ols')
+
+summarized_elimyear <- rbind(summarized_elimyear_rf_fe, summarized_elimyear_ols)
+
+ggplot(summarized_elimyear, aes(x = elim_year, y = rmse_mean, col = model_type)) +
+  geom_line() +
+  geom_errorbar(aes(ymin=rmse_mean - rmse_sd, ymax=rmse_mean + rmse_sd), width=0) +
+  ggtitle('eliminated year, rmse') + 
+  theme_bw()
+
+ggplot(summarized_elimyear, aes(x = elim_year, y = error_mean, col = model_type)) +
+  geom_line() +
+  geom_errorbar(aes(ymin=error_mean - error_sd, ymax=error_mean + error_sd), width=0) +
+  ggtitle('eliminated year, error') + 
+  theme_bw()
 
 # rmse vs eliminated cell
 
+elimcell_results <- imported_prediction_error[imported_prediction_error$elim_type == "cell",]
+elimcell_rf <- elimcell_results[elimcell_results$model_type == 'rf',]
+elimcell_ols <- elimcell_results[elimcell_results$model_type == 'ols',]
+
+print('_____')
+print(paste('elim cell, rmse, rf: ', mean(elimcell_rf$rmse), '+/-', sd(elimcell_rf$rmse)))
+print(paste('elim cell, rmse, ols: ', mean(elimcell_ols$rmse), '+/-', sd(elimcell_ols$rmse)))
+print('_____')
+print(paste('elim cell, error, rf: ', mean(elimcell_rf$error), '+/-', sd(elimcell_rf$error)))
+print(paste('elim cell, error, ols: ', mean(elimcell_ols$error), '+/-', sd(elimcell_ols$error)))
+
 # calculate mean rmse for all prediction accuracies
+
+elimrandom_results <- imported_prediction_error[imported_prediction_error$elim_type == "30%",]
+elimrandom_rf <- elimrandom_results[elimrandom_results$model_type == 'rf',]
+elimrandom_ols <- elimrandom_results[elimrandom_results$model_type == 'ols',]
+elimrandom_fe <- elimrandom_results[elimrandom_results$model_type == 'fe',]
+
+print('_____')
+print(paste('elim 30%, rmse, rf: ', mean(elimrandom_rf$rmse), '+/-', sd(elimrandom_rf$rmse)))
+print(paste('elim 30%, rmse, ols: ', mean(elimrandom_ols$rmse), '+/-', sd(elimrandom_ols$rmse)))
+print(paste('elim 30%, rmse, fe: ', mean(elimrandom_fe$rmse), '+/-', sd(elimrandom_fe$rmse)))
+print('_____')
+print(paste('elim 30%, error, rf: ', mean(elimrandom_rf$error), '+/-', sd(elimrandom_rf$error)))
+print(paste('elim 30%, error, ols: ', mean(elimrandom_ols$error), '+/-', sd(elimrandom_ols$error)))
+print(paste('elim 30%, error, fe: ', mean(elimrandom_fe$error), '+/-', sd(elimrandom_fe$error)))
+```
+
+```{r}
+
+# F test for FE vs pooled OLS
+
+# set up models with all data
+chosen_percentile <- "percentile5"
+chosen_intensity <- "DC"
+
+cell_df <- cell_sf_tidy[(cell_sf_tidy$plant_stat_type == chosen_percentile) & (cell_sf_tidy$intensity == chosen_intensity), ]
+cell_df_panel <- pdata.frame(cell_df, index = c("cell_ID"))
+
+ols_model <- lm(plant ~ onset + year + lat + region, data = cell_df)
+
+fe_model <- plm(plant ~ onset + year, data =  cell_df_panel, model = "within")
+
+print(plm::pFtest(fe_model, ols_model))
 
 ```
 
 Model evaluation
 
 ```{r}
+
 # for the chosen FE specification, but for each intensity x percentile and grid offset, do model evaluation:
 
 # residuals of zero mean

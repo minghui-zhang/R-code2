@@ -8,7 +8,7 @@ output: html_document
 
 ```{r}
 
-os_system <- 'windows_laptop' # mac for laptop or windows for desktop
+os_system <- 'windows' # mac for laptop or windows for desktop
 if (os_system == 'windows') {first_folder <- 'E:'}
 if (os_system == 'mac') {first_folder <- '~/Documents'}
 if (os_system == 'windows_laptop') {first_folder <- 'D:'}
