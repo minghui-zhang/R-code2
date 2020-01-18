@@ -1321,48 +1321,415 @@ Model evaluation
 
 ```{r}
 
-# for the chosen FE specification, but for each intensity x percentile and grid offset, do model evaluation:
+# for the chosen FE specification, but for each intensity x percentile , do model evaluation:
 
-# residuals of zero mean
+model_evaluation <- data.frame(intensity = character(0), percentile = character(0),
+                               onset_coef = numeric(0), onset_coef_stderr = numeric(0),
+                               year_coef = numeric(0), year_coef_stderr = numeric(0),
+                               R2 = numeric(0), resid_mean = numeric(0), 
+                               percent_tempauto = numeric(0), mean_residual_moran = numeric(0), 
+                               mean_residual_moran_pval = numeric(0),
+                               highest_predictor_correlation = numeric(0)
+                               )
 
-# QQ plot for residuals
+for (intensity in c("DC", "SC")) {
+  for (percentile in c("percentile5", "percentile25", "median")) {
+    cell_df <- cell_sf_tidy
+    st_geometry(cell_df) <- NULL
+    
+    data_subset_sf <- cell_sf_tidy[(cell_sf_tidy$plant_stat_type == percentile) & (cell_sf_tidy$intensity == intensity), ]
+    
+    data_subset <- cell_df[(cell_df$plant_stat_type == percentile) & (cell_df$intensity == intensity), ]
+    data_subset_panel <- pdata.frame(data_subset, index = c("cell_ID"))
 
-# correlation between residual and each of the predictors
+    fe_model <- plm(plant ~ onset + year, data = data_subset_panel, model = "within")
+    
+    data_subset_sf$residuals <- residuals(fe_model)
+    data_subset_sf$fitted.values <- fitted.values(fe_model)
+    data_subset$residuals <- residuals(fe_model)
+    data_subset$fitted.values <- fitted.values(fe_model)
+    
+    # get coefficients
+    coefficients <- fe_model$coefficients
+    onset_coef <- coefficients["onset"]
+    year_coef <- coefficients["year"]
+    
+    # standard errors
+    std_errors <- summary(fe_model)$coefficients[,2]
+    onset_std_error <- std_errors["onset"]
+    year_std_error <- std_errors["year"]
+  
+    # R2
+    SST <- sum((data_subset$plant - mean(data_subset$plant))^2)
+    SSE <- sum((data_subset$residuals - mean(data_subset$residuals))^2)
+    R2 <- 1 - SSE/SST
+    
+    # residuals of zero mean --------------------------------------------------------------------
+    resid_mean = mean(data_subset$residuals)
 
-# spatial and temporal autocorrelation of residual
+    # QQ plot for residuals ---------------------------------------------------------------------
+    qqnorm(data_subset$residuals, pch = 1, frame = FALSE, main = paste('QQ plot for residual', intensity, percentile))
+    qqline(data_subset$residuals, col = "steelblue", lwd = 2)
+    
+    # correlation between residual and each of the predictors (exogeneity) ----------------------
+    plot(data_subset$onset, data_subset$residuals, main = paste("onset vs residual (exogeneity)", intensity, percentile))
+    abline(h = 0)
+    
+    plot(data_subset$year, data_subset$residuals, main = paste("year vs residual (exogeneity)", intensity, percentile)) 
+    abline(h = 0)
+    
+    # temporal autocorrelation of residual -----------------------------------------------------
+    data_subset_2 <- data_subset[complete.cases(data_subset),]
+    cells_list <- list()
+    i <- 1
+    for (year in 2004:2014) {
+       cells_in_year <- data_subset_2[data_subset_2$year == year,]
+       cells_list[[i]] <- cells_in_year$label
+       i <- i + 1
+    }
+    full_data_cells <- Reduce(intersect, cells_list)
+    data_subset_2 <- data_subset_2[data_subset_2$label %in% full_data_cells, ]
+     
+    data_subset_2_nested <- group_by(data.frame(data_subset_2), label) %>% nest()
+     
+    dwtest_one_cell <- function(data) {
+      dwtest(residuals ~ 1, data = data)
+     }
+     
+    data_subset_2 <- data_subset_2_nested %>%
+       mutate(dwtest = map(data, dwtest_one_cell)) %>%
+       mutate(test_df = map(dwtest, generics::tidy)) %>%
+       unnest(test_df)
+     
+    # calculate proportion of p values below 5% significance, with Bonferroni correction
+    percent_tempauto <- mean(data_subset_2$p.value < 0.05/nrow(data_subset_2))
+    
+    # spatial autocorrelation of residual ----------------------------------------------------------
+    
+    residual_morans <- numeric(0)
+    residual_moran_pvals <- numeric(0)
+    
+    for (year_oi in 2004:2014) {
+      # need 'one layer': one year, one intensity, set up weights
+      to_autocorrelation <- data_subset_sf[data_subset_sf$year == year_oi, ]
+      to_autocorrelation_sp <- as(to_autocorrelation, "Spatial")
+      st_geometry(to_autocorrelation) <- NULL # turn to_autocorrelation into data frame
+      centroids <- coordinates(to_autocorrelation_sp)
+      to_autocorrelation_points <- SpatialPointsDataFrame(coords = centroids, data = to_autocorrelation)
+      nb<-knn2nb(knearneigh(to_autocorrelation_points)) 
+      lw <- nb2listw(nb, zero.policy = TRUE)
+      
+      # calculate spatial autocorrelation
+      moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, 500, zero.policy = TRUE)
+      
+      residual_morans <- c(residual_morans, moran_residual$statistic)
+      residual_moran_pvals <- c(residual_moran_pvals, moran_residual$p.value)
+    }
+    
+    mean_residual_moran <- mean(residual_morans)
+    mean_residual_moran_pval <- mean(residual_moran_pvals)
+    
+    # correlation of selected predictors (to each other) -------------------------------------------
+    predictors <- data_subset[,c("onset", "year")]
+    correlations <- cor(predictors)
+    diag(correlations) <- 0 # place 1 with 0 on diagonal
+    highest_predictor_correlation <- max(abs(correlations))
+    
+    # residual vs fitted value plot (look for no pattern and constant variance) --------------------
+    plot(x = as.numeric(data_subset$fitted.values), y = as.numeric(data_subset$residuals), 
+         main = paste("fitted values vs residuals", intensity, percentile))
+    
+    # residual vs index (look for no pattern) ------------------------------------------------------
+    plot(as.numeric(data_subset$residuals), main = paste("residual vs index", intensity, percentile))
+    
+    # save results
+    model_evaluation <- rbind(model_evaluation, data.frame(intensity = intensity, percentile = percentile,
+                               onset_coef = onset_coef, onset_coef_stderr = onset_std_error,
+                               year_coef = year_coef, year_coef_stderr = year_std_error,
+                               R2 = R2, resid_mean = resid_mean, 
+                               percent_tempauto = percent_tempauto, mean_residual_moran = mean_residual_moran, 
+                               mean_residual_moran_pval = mean_residual_moran_pval,
+                               highest_predictor_correlation = highest_predictor_correlation
+                               ))
+  }
+}
 
-# correlation of selected predictors (to each other)
-
-# residual vs fitted value plot (look for no pattern and constant variance)
+print(model_evaluation)
 
 ```
 
-
-Model results
-
-```{r}
-
-# onset and year coef for each intensity and percentile, along with errors representing sampling grid location. do for each chosen onset definition
-
-# add cumulative error due to standard error, sampling grid position, eliminated predictors, error in planting date estimate?
-
-# include results for 95th percentile?
-
-```
 
 Map of fixed effects that were estimated
 
 ```{r}
 
+# try year_index to get 
 # use all cells for the FE model; produce maps for SC and DC separately
+for (intensity in c("DC", "SC")) {
+  for (percentile in c("percentile5", "percentile25", "median")) {
+    
+    cell_df <- cell_sf_tidy
+    st_geometry(cell_df) <- NULL
+    
+    data_subset_sf <- cell_sf_tidy[(cell_sf_tidy$plant_stat_type == percentile) & (cell_sf_tidy$intensity == intensity), ]
+    
+    data_subset <- cell_df[(cell_df$plant_stat_type == percentile) & (cell_df$intensity == intensity), ]
+    data_subset_panel <- pdata.frame(data_subset, index = c("cell_ID"))
+
+    fe_model <- plm(plant ~ onset + year, data = data_subset_panel, model = "within")
+    fixed_effects <- fixef(fe_model)
+    
+    fe_df <- data.frame(cell_ID = names(fixed_effects),
+                    fe = fixed_effects)
+    # join
+    fe_sf <- merge(data_subset_sf, fe_df, by = "cell_ID")
+
+    # plot fe
+    year <- 2014 # all years will be the same for fixed effects
+    fe_sf_year <- fe_sf[fe_sf$year == year, ]
+
+    fe_map <- ggplot(fe_sf_year) +
+      geom_sf(aes(fill = fe), colour = NA) +
+      scale_fill_viridis() +
+      ggtitle(paste("Fixed effects", intensity, percentile)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+    
+    print(fe_map)
+  }
+}
+
 
 ```
 
-Map of predictive error for OLS and FE
+Map of residual for OLS and FE (can't do predictive error map for FE)
 
 ```{r}
 
-# use all cells for OLS and FE models; produce maps for SC and DC separately
+# residual map: use all cells for OLS and FE models; produce maps for SC and DC separately ----------------------------
+
+for (intensity in c("SC", "DC")) {
+  for (percentile in c('percentile5', 'percentile25', 'median')) {
+    cell_df <- cell_sf_tidy
+    st_geometry(cell_df) <- NULL
+        
+    data_subset_sf <- cell_sf_tidy[(cell_sf_tidy$plant_stat_type == percentile) & (cell_sf_tidy$intensity == intensity), ]
+        
+    data_subset <- cell_df[(cell_df$plant_stat_type == percentile) & (cell_df$intensity == intensity), ]
+    data_subset_panel <- pdata.frame(data_subset, index = c("cell_ID"))
+    
+    fe_model <- plm(plant ~ onset + year, data = data_subset_panel, model = "within")
+    ols_model <- lm(plant ~ onset + year + lat + region, data = data_subset)
+    
+    data_subset_sf$ols_residuals <- ols_model$residuals
+    data_subset_sf$fe_residuals <- fe_model$residuals
+    
+    year <- 2014
+    data_subset_sf_year <- data_subset_sf[data_subset_sf$year == year, ]
+        
+    ols_resid_map <- ggplot(data_subset_sf_year) +
+      geom_sf(aes(fill = ols_residuals), color = NA) +
+      scale_fill_viridis() +
+      ggtitle(paste("OLS residuals", year, intensity, percentile)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+    
+    fe_resid_map <- ggplot(data_subset_sf_year) +
+      geom_sf(aes(fill = fe_residuals), color = NA) +
+      scale_fill_viridis() +
+      ggtitle(paste("FE residuals", year, intensity, percentile)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+    
+    print(ols_resid_map)
+    print(fe_resid_map)
+  }
+}
+
+# predictive error map, eliminate one year, for OLS and FE ----------------------------------------------
+
+elim_year = 2014
+
+for (intensity in c("SC", "DC")) {
+  for (percentile in c('percentile5', 'percentile25', 'median')) {
+    
+    # eliminate a year and test it; model_type is ols or rf or fe
+    train_elimyear <- data_subset[data_subset$year != elim_year,]
+    valid_elimyear <- data_subset[data_subset$year == elim_year,]
+      
+    # for mapping
+    valid_sf_elimyear <- data_subset_sf[data_subset_sf$year == elim_year,]
+    
+    # ols model
+    ols_model <- lm(plant ~ onset + year + lat + region, data = train_elimyear)
+    ols_error_elimyear <- predict(ols_model, valid_elimyear) - valid_elimyear$plant
+    valid_sf_elimyear$ols_error <- ols_error_elimyear
+    
+    # fe model
+    train_elimyear_panel <- pdata.frame(train_elimyear,index = c("cell_ID"))
+
+    fe_model <- plm(plant ~ onset + year, data =  train_elimyear_panel, model = "within")
+    fixed_effects <- fixef(fe_model)
+    fe_df <- data.frame(fixef_cell_ID = names(fixed_effects), 
+                        fixef = as.numeric(fixed_effects))
+        
+    # ensures that rows are in same order as valid
+    temp <- dplyr::left_join(valid_elimyear, fe_df, by = c("cell_ID" = "fixef_cell_ID"))
+        
+    # get only the cells that have fixed effects predicted
+    has_fe_indeces <- which(!is.na(temp$fixef))
+    prediction <- temp$fixef + fe_model$coefficients['year'] * valid_elimyear$year +  fe_model$coefficients['onset'] * valid_elimyear$onset
+        
+    # get only the cells that have fixed effects predicted
+    fe_error_elimyear <- prediction[has_fe_indeces] - valid_elimyear$plant[has_fe_indeces]
+    valid_sf_elimyear_fe <- valid_sf_elimyear[has_fe_indeces,]
+    valid_sf_elimyear_fe$fe_error <- fe_error_elimyear
+    
+    # map
+    ols_prediction_map <- ggplot(valid_sf_elimyear) +
+      geom_sf(aes(fill = ols_error), color = NA) +
+      scale_fill_viridis() +
+      ggtitle(paste("OLS prediction error", elim_year, intensity, percentile)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+    
+    fe_prediction_map <- ggplot(valid_sf_elimyear_fe) +
+      geom_sf(aes(fill = fe_error), color = NA) +
+      scale_fill_viridis() +
+      ggtitle(paste("FE prediction error", elim_year, intensity, percentile)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+    
+    print(ols_prediction_map)
+    print(fe_prediction_map)
+  }
+}
+```
+
+Model results
+
+```{r}
+
+# onset and year coef for each intensity and percentile, with uncertainty in coef due to planting date estimation error and standard error
+
+plant_sd <- 6.9 # error
+n_data_bootstrap <- 1000 # number of bootstrap samples to take of planting date estimates
+
+# save data bootstrap results
+data_bootstrap_coefs <- data.frame(intensity = character(0), percentile = character(0),
+                                   onset_coef = numeric(0), onset_sderr = numeric(0),
+                                   year_coef = numeric(0), year_sderr = numeric(0))
+
+# take one bootstramp sample of planting date, assuming normal distribution
+bootstrap_one_date <- function(row, sd) {
+  mean_date <- row$plant
+  row$bootstrap_plant <- rnorm(1, mean = mean_date, sd = sd)
+}
+
+cell_df <- cell_sf_tidy
+st_geometry(cell_df) <- NULL
+
+for (n in 1:n_data_bootstrap) {
+  print(n)
+  # Step 1. bootstrap planting date information
+  bs_plant <- apply(cell_sf_tidy,1,bootstrap_one_date,sd = plant_sd)
+  bs_cell_df <- cell_df
+  bs_cell_df$bs_plant <- bs_plant
+  
+  # Step 2. split by intensity, percentile
+  for (intensity in c("SC", "DC")) {
+    for (percentile in c('percentile5', 'percentile25', 'median')) {
+      
+
+      bs_data_subset <- bs_cell_df[(bs_cell_df$plant_stat_type == percentile) & (bs_cell_df$intensity == intensity), ]
+      bs_data_subset_panel <- pdata.frame(bs_data_subset, index = c("cell_ID"))
+          
+      # Step 3. run FE model, get coefficients
+      fe_model <- plm(plant ~ onset + year, data = bs_data_subset_panel, model = "within")
+      
+      # get coefficients
+      coefficients <- fe_model$coefficients
+      onset_coef <- coefficients["onset"]
+      year_coef <- coefficients["year"]
+          
+      # standard errors
+      std_errors <- summary(fe_model)$coefficients[,2]
+      onset_std_error <- std_errors["onset"]
+      year_std_error <- std_errors["year"]
+      
+      data_bootstrap_coefs <- rbind(data_bootstrap_coefs, data.frame(intensity = intensity, percentile = percentile,
+                                   onset_coef = onset_coef, onset_sderr = onset_std_error,
+                                   year_coef = year_coef, year_sderr = year_std_error))
+    }
+  }
+}
 
 ```
 
+```{r}
+
+final_bootstrap_coefs <- data.frame(intensity = character(0), percentile = character(0),
+                                    onset_coef = numeric(0), onset_sderr = numeric(0),
+                                    year_coef = numeric(0), year_sderr = numeric(0))
+
+bootstrap_one_coef <- function(row, mean_coef_name, sd_coef_name, n) {
+  mean_coef <- as.numeric(row[mean_coef_name])
+  sd_coef <- as.numeric(row[sd_coef_name])
+  bs_coefs <- rnorm(n = n, mean = mean_coef, sd = sd_coef)
+}
+
+onset_coefs_list <- vector("list", 6)
+year_coefs_list <- vector("list", 6)
+
+list_index <- 0
+for (intensity in c("SC", "DC")) {
+  for (percentile in c('percentile5', 'percentile25', 'median')) {
+    
+    list_index <- list_index + 1
+
+    coefs <- data_bootstrap_coefs[(data_bootstrap_coefs$intensity == intensity) & (data_bootstrap_coefs$percentile == percentile),]
+    
+    # these are matrices, rows = number of bootstraps from the standard error distribution
+    bs_onset_coefs <- apply(coefs,1,bootstrap_one_coef, mean_coef_name = 'onset_coef', sd_coef_name = 'onset_sderr', n = 10)
+    bs_year_coefs <- apply(coefs,1,bootstrap_one_coef, mean_coef_name = 'year_coef', sd_coef_name = 'year_sderr', n = 10)
+    
+    final_onset_coef <- mean(bs_onset_coefs)
+    final_onset_sderr <- sd(bs_onset_coefs)
+    final_year_coef <- mean(bs_year_coefs)
+    final_year_sderr <- sd(bs_year_coefs)
+    
+    onset_coefs_list[[list_index]] <- as.vector(bs_onset_coefs)
+    year_coefs_list[[list_index]] <- as.vector(bs_year_coefs)
+    
+    final_bootstrap_coefs <- rbind(final_bootstrap_coefs, data.frame(intensity = intensity, percentile = percentile,
+                                                                     onset_coef = final_onset_coef, onset_sderr = final_onset_sderr,
+                                                                     year_coef = final_year_coef, year_sderr = final_year_sderr))
+  }
+}
+
+names(onset_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 'DC_percentile5', 'DC_percentile25', 'DC_median')
+names(year_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 'DC_percentile5', 'DC_percentile25', 'DC_median')
+
+# compare coefs across intensities and groups
+diff_intensities_median <- t.test(onset_coefs_list[['SC_median']], onset_coefs_list[['DC_median']])$p.value
+diff_intensities_percentile25 <- t.test(onset_coefs_list[['SC_percentile25']], onset_coefs_list[['DC_percentile25']])$p.value
+diff_intensities_percentile5 <- t.test(onset_coefs_list[['SC_percentile5']], onset_coefs_list[['DC_percentile5']])$p.value
+
+diff_percentile5_25_SC <- t.test(onset_coefs_list[['SC_percentile5']], onset_coefs_list[['SC_percentile25']])$p.value
+diff_percentile5_25_DC <- t.test(onset_coefs_list[['DC_percentile5']], onset_coefs_list[['DC_percentile25']])$p.value
+
+diff_percentile25_50_SC <- t.test(onset_coefs_list[['SC_percentile25']], onset_coefs_list[['SC_median']])$p.value
+diff_percentile25_50_DC <- t.test(onset_coefs_list[['DC_percentile25']], onset_coefs_list[['DC_median']])$p.value
+
+print('p values comparing intensities:')
+print(paste(diff_intensities_median, diff_intensities_percentile25, diff_intensities_percentile5))
+
+print('p values comparing percentile5 and percentile25:')
+print(paste(diff_percentile5_25_SC, diff_percentile5_25_DC))
+
+print('p values comparing percentile25 and median:')
+print(paste(diff_percentile25_50_SC, diff_percentile25_50_DC))
+
+print(final_bootstrap_coefs)
+
+```
