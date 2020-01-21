@@ -8,33 +8,638 @@ output: html_document
 
 # import data
 
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(rgdal)
+library(raster)
+library(sf)
+library(sp)
+library(leaps)
+library(viridis)
+library(spatial)
+library(spdep)
+library(plm)
+
+os_system <- 'windows' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_plotting.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_sample_data.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R'))
+
+
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+# read in all the onsets. only the csv, not shp
+all_onset_types <- c('AA_2_persiann', 'AA_3_persiann', 
+                      'AA_25_persiann', 'AA_25_chirps_ATgabriel25km', 'AA_25_persiann_ATgabriel25km',
+                     'freq_5_persiann', 'freq_8_persiann', 'freq_10_persiann', 'freq_12_persiann',
+                     'monsoon_30_persiann', 'monsoon_40_persiann',
+                     'pentad_8_persiann', 'pentad_10_persiann', 'pentad_15_persiann',
+                     'rangethres_10_15_15_30_persiann', 'rangethres_10_15_15_40_persiann',
+                     'rangethres_10_15_20_20_persiann', 'rangethres_10_15_20_30_persiann',
+                     'rangethres_10_15_30_40_persiann', 'thres_10_persiann',
+                     'AA_25_chirps_ATchirps5km', 
+                     'freq_5_chirps_ATchirps5km', 'freq_8_chirps_ATchirps5km', 
+                     'freq_10_chirps_ATchirps5km', 'freq_12_chirps_ATchirps5km',
+                     'rangethres_10_15_15_30_chirps_ATchirps5km',
+                     'rangethres_10_15_15_40_chirps_ATchirps5km',
+                     'rangethres_10_15_20_20_chirps_ATchirps5km',
+                     'rangethres_10_15_20_30_chirps_ATchirps5km',
+                     'rangethres_10_15_30_40_chirps_ATchirps5km')
+
+# save onset information for specific onsets
+onset_info <- data.frame(
+  onset_type = character(0),
+  grid_size = numeric(0),
+  precip_data = character(0),
+  onset_def_type = character(0),
+  thres = character(0),
+  onset_scale = character(0)
+)
+
+onset_info <- rbind(onset_info,
+                    data.frame(onset_type = 'Gabriel_onset', grid_size = 0.75, precip_data = 'Xavier', onset_def_type = 'AA', thres = '2.5', onset_scale = '25km_Gabriel'),
+                    data.frame(onset_type = 'AA_2_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'AA', thres = '2', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'AA_3_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'AA', thres = '3', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'AA_25_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'AA', thres = '2.5', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'AA_25_chirps_ATgabriel25km', grid_size = 0.75, precip_data = 'chirps', onset_def_type = 'AA', thres = '2.5', onset_scale = '25km_Gabriel'),
+                    data.frame(onset_type = 'AA_25_persiann_ATgabriel25km', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'AA', thres = '2.5', onset_scale = '25km_Gabriel'),
+                    data.frame(onset_type = 'freq_5_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'freq', thres = '5', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'freq_8_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'freq', thres = '8', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'freq_10_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'freq', thres = '10', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'freq_12_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'freq', thres = '12', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'monsoon_30_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'monsoon', thres = '30', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'monsoon_40_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'monsoon', thres = '40', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'pentad_8_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'pentad', thres = '8', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'pentad_10_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'pentad', thres = '10', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'pentad_15_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'pentad', thres = '15', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'rangethres_10_15_15_30_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'rangethres', thres = '10_15_15_30', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'rangethres_10_15_15_40_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'rangethres', thres = '10_15_15_40', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'rangethres_10_15_20_20_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'rangethres', thres = '10_15_20_20', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'rangethres_10_15_20_30_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'rangethres', thres = '10_15_20_30', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'rangethres_10_15_30_40_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'rangethres', thres = '10_15_30_40', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'thres_10_persiann', grid_size = 0.75, precip_data = 'persiann', onset_def_type = 'thres', thres = '10', onset_scale = '25km_persiann'),
+                    data.frame(onset_type = 'AA_25_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'AA', thres = '2.5', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'freq_5_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'freq', thres = '5', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'freq_8_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'freq', thres = '8', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'freq_10_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'freq', thres = '10', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'freq_12_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'freq', thres = '12', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'rangethres_10_15_15_30_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'rangethres', thres = '10_15_15_30', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'rangethres_10_15_15_40_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'rangethres', thres = '10_15_15_40', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'rangethres_10_15_20_20_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'rangethres', thres = '10_15_20_20', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'rangethres_10_15_20_30_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'rangethres', thres = '10_15_20_30', onset_scale = '5km_chirps'),
+                    data.frame(onset_type = 'rangethres_10_15_30_40_chirps_ATchirps5km', grid_size = 0.5, precip_data = 'chirps', onset_def_type = 'rangethres', thres = '10_15_30_40', onset_scale = '5km_chirps')
+                    )
+
+crop_intensities <- c('SC', 'DC')
+plant_stat_types <- c('median', 'percentile5', 'percentile25')
+
+```
+
+Run FE model and save results
+
+```{r}
+for (onset_type in all_onset_types) {
+  
+  # get info for the onset_type
+  row <- onset_info[onset_info$onset_type == onset_type,]
+  
+  precip_data <- row$precip_data
+  onset_def_type <- row$onset_def_type
+  thres <- row$thres
+  onset_scale <- row$onset_scale
+  
+  # read and clean the data ---------------------------------------------------------------------------------------------------------
+  filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/median_onset_cell_', onset_type, '.csv')
+  filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/percentile5_onset_cell_', onset_type, '.csv')
+  filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/percentile25_onset_cell_', onset_type, '.csv')
+  
+  filename_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
+  layername_shp <- paste0('median_onset_cell_SHP_', onset_type)
+    
+  median_cell_raw <- read.csv(filename_median)
+  percentile5_cell_raw <- read.csv(filename_percentile5)
+  percentile25_cell_raw <- read.csv(filename_percentile25)
+    
+  cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+ 
+  # CSV DATA -----------------------------------------------------------------------------------------------
+  # median cell
+  median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                      rename_cols_median_cell()
+  median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+  
+  
+  # percentiles
+  percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+  percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+  
+  # SF DATA ------------------------------------------------------------------------------------------------
+  
+  # get cell_ID column for median
+  cell_sf$cell_ID <- median_cell$cell_ID
+  cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+  
+  # join median, percentile data to cell_sf
+  # cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+  
+  cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+  
+  cell_sf_percentile5 <- cell_sf
+  cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+  cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+  cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+  
+  cell_sf_percentile25 <- cell_sf
+  cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+  cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+  cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
+  
+  cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+  
+  cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+              dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+              categorize_regions_cell_sf_tidy() # categorize cells into four regions
+  
+  cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+  cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+  
+  cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+  cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+  
+  # split into SC and DC cells
+  cell_sf_tidy_SC <- cell_sf_tidy[cell_sf_tidy$intensity == "SC",]
+  cell_sf_tidy_DC <- cell_sf_tidy[cell_sf_tidy$intensity == "DC",]
+
+  # define dataframe to store results --------------------------------------------------------------------------------------
+  
+  output_results <- data.frame(
+  
+    model_type <- character(0), # FE or OLS
+    intensity = character(0),
+    plant_stat_type = character(0),
+    lat_predictor = character(0), # to indicate the presence of predictors. yes or no. NA if using fixed effects
+    lon_predictor = character(0),
+    year_predictor = character(0),
+    region_predictor = character(0),
+    
+    onset_type = character(0),
+    precip_data = character(0),
+    onset_def_type = character(0),
+    thres = character(0),
+    onset_scale = character(0),
+    
+    onset_coef = numeric(0),
+    onset_coef_stderr = numeric(0),
+    year_coef = numeric(0),
+    year_coef_stderr = numeric(0),
+    lat_coef = numeric(0),
+    lat_coef_stderr = numeric(0),
+    
+    R2 = numeric(0),
+    slope_onset_residual = numeric(0),
+    slope_fittedPlant_residual = numeric(0),
+    
+    moran_i_residual = numeric(0),
+    moran_i_pval_residual = numeric(0),
+    moran_i_onset = numeric(0),
+    moran_i_pval_onset = numeric(0),
+    moran_i_plant = numeric(0),
+    moran_i_pval_plant = numeric(0)
+  )
+  
+  # FE model ----------------------------------------------------------------------------------------------------------------
+  for (plant_stat_type in plant_stat_types) {
+    for (crop_intensity in crop_intensities) {
+    
+        if (crop_intensity == 'SC') {cell_sf_tidy_intensity <- cell_sf_tidy_SC}
+        if (crop_intensity == 'DC') {cell_sf_tidy_intensity <- cell_sf_tidy_DC}
+        
+        # sample from full data and turn into data frame
+        sampled_withGeom <- cell_sf_tidy_intensity[cell_sf_tidy_intensity$plant_stat_type == plant_stat_type,]
+        sampled <- cell_sf_tidy_intensity[cell_sf_tidy_intensity$plant_stat_type == plant_stat_type,]
+        st_geometry(sampled) <- NULL
+        
+        # for plm, first set data as panel data
+        panel <- pdata.frame(sampled,index = c("cell_ID"))
+          
+        # FE model
+        fe_result <- plm(plant ~ onset + year_index, data = panel, model = "within")
+          
+        # save coefficients
+        onset_coef <- summary(fe_result)$coefficients['onset',]['Estimate']
+        onset_coef_stderr <- summary(fe_result)$coefficients['onset',]['Std. Error']
+        year_coef <- summary(fe_result)$coefficients['year_index',]['Estimate']
+        year_coef_stderr <- summary(fe_result)$coefficients['onset',]['Std. Error']
+          
+        # R2
+        SST <- sum((sampled$plant - mean(sampled$plant))^2)
+        SSE <- sum((fe_result$residuals - mean(fe_result$residuals))^2)
+        R2 <- 1 - SSE/SST
+          
+        # model diagnostics: residual, observed plant and fitted plant
+        error_df <- data.frame(residual = fe_result$residuals,
+                                observed = sampled$plant,
+                                fitted =  sampled$plant - fe_result$residuals,
+                                onset = sampled$onset)
+          
+          
+        onset_residual_model <- lm(residual ~ onset, data = error_df)
+        onset_residual_slope <- onset_residual_model$coefficients['onset']
+          
+        fitted_residual_model <- lm(residual ~ fitted, data = error_df)
+        fitted_residual_slope <- fitted_residual_model$coefficients['fitted']
+          
+        # model diagnostics: spatial autocorrelation of residuals, onset, plant for all years
+        sampled_withGeom$residuals <- fe_result$residuals
+        
+        moran_i_residual_list <- numeric(0)
+        moran_i_plant_list <- numeric(0)
+        moran_i_onset_list <- numeric(0)
+        
+        moran_pval_residual_list <- numeric(0)
+        moran_pval_plant_list <- numeric(0)
+        moran_pval_onset_list <- numeric(0)
+        
+        for (year_oi in 2004:2014) {
+          
+          to_autocorrelation <- sampled_withGeom[sampled_withGeom$year == year_oi, ]
+          to_autocorrelation_sp <- as(to_autocorrelation, "Spatial")
+          st_geometry(to_autocorrelation) <- NULL # turn to_autocorrelation into data frame
+          centroids <- coordinates(to_autocorrelation_sp)
+          to_autocorrelation_points <- SpatialPointsDataFrame(coords = centroids, data = to_autocorrelation)
+          nb<-knn2nb(knearneigh(to_autocorrelation_points)) 
+          lw <- nb2listw(nb, zero.policy = TRUE)
+            
+          # calculate spatial autocorrelation
+          moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, 500, zero.policy = TRUE)
+          moran_onset <- moran.mc(to_autocorrelation_points$onset, lw, 500, zero.policy = TRUE)
+          moran_plant <- moran.mc(to_autocorrelation_points$plant, lw, 500, zero.policy = TRUE)
+            
+          moran_i_residual <- moran_residual$statistic
+          moran_i_pval_residual <- moran_residual$p.value
+          moran_i_onset <- moran_onset$statistic
+          moran_i_pval_onset <- moran_onset$p.value
+          moran_i_plant <- moran_plant$statistic
+          moran_i_pval_plant <- moran_plant$p.value
+          
+          moran_i_residual_list <- c(moran_i_residual_list, moran_i_residual)
+          moran_i_plant_list <- c(moran_i_plant_list, moran_i_plant)
+          moran_i_onset_list <- c(moran_i_onset_list, moran_i_onset)
+          
+          moran_pval_residual_list <- c(moran_pval_residual_list, moran_i_pval_residual)
+          moran_pval_plant_list <- c(moran_pval_plant_list, moran_i_pval_plant)
+          moran_pval_onset_list <- c(moran_pval_onset_list, moran_i_pval_onset)
+        }
+          
+        # save
+        output_row <- data.frame(
+            
+          model_type = 'FE',
+          intensity = crop_intensity, plant_stat_type = plant_stat_type,
+           
+          lat_predictor = 'NA', lon_predictor = 'NA',
+          year_predictor = 'yes', region_predictor = 'NA',
+    
+          onset_type = onset_type, precip_data = precip_data, onset_def_type = onset_def_type, 
+          thres = thres, onset_scale = onset_scale,
+            
+          onset_coef = onset_coef, onset_coef_stderr = onset_coef_stderr,
+          year_coef = year_coef, year_coef_stderr = year_coef_stderr,
+          lat_coef = NA, lat_coef_stderr = NA,
+            
+          R2 = R2, 
+          slope_onset_residual = onset_residual_slope, slope_fittedPlant_residual = fitted_residual_slope,
+            
+          moran_i_residual = mean(moran_i_residual_list), moran_i_pval_residual = mean(moran_pval_residual_list),
+          moran_i_onset = mean(moran_i_onset_list), moran_i_pval_onset = mean(moran_pval_onset_list),
+          moran_i_plant = mean(moran_i_plant_list), moran_i_pval_plant = mean(moran_pval_plant_list)
+        )
+          
+        #print(output_row)
+          
+        output_results <- rbind(output_results, output_row)
+
+        }
+      }
+  
+  print(paste('FE done for', onset_type))
+  
+  # export test results
+  filename = paste0('E:/R-code2/Modeling/output/robustness_test_nospatialsample/', onset_type, '.RData')
+  save(output_results, file = filename)
+}
+
+```
+
+Load FE model results (from FE, using all data, i.e. no spatial sampling)
+
+```{r}
+
+# empty data frame to store results
+all_results <- data.frame()
+
+# add in results for each onset_type
+for (onset_type in all_onset_types) {
+
+  # read the data ---------------------------------------------------------------------------------------------------------
+  filename <- paste0(first_folder,"/R-code2/Modeling/output/robustness_test_nospatialsample/", onset_type, ".RData")
+  loaded_data <- load(filename)
+  
+  #result_name <- paste0(onset_type, '_results')
+  #assign(result_name, get(loaded_data))
+
+  all_results <- rbind(all_results, get(loaded_data))
+  
+  rm(loaded_data) # Remove the old object since you've stored it in result_name
+
+}
+
+# create new column for onset_def_type + thres combination
+create_type_and_thres_col <- function(row) {
+
+    onset_type <- row['onset_def_type']
+    thres_val <- row['thres']
+    type_and_thres <- paste0(onset_type, '_', thres_val)
+    return(type_and_thres)
+}
+ 
+
+all_results['onset_def_type_thres'] <- apply(all_results, 1, create_type_and_thres_col)
+
 ```
 
 Perform chosen FE model specification for each onset definition
 
 ```{r}
 
-# do FE model, tabulate onset coef for different intensities, precip datasets, percentiles
+# save top five model specs in each intensity x plant_stat_type
+top_onsets <- data.frame()
 
+
+
+# tabulate onset coef for different intensities, precip datasets, percentiles
+for (crop_intensity in c("SC", "DC")) {
+    for (plant_stat_type in c("median", "percentile25", "percentile5")) {
+      
+      # get rid of 25km_Gabriel scale for simplicity
+      results <- all_results[all_results$intensity == crop_intensity & all_results$plant_stat_type == plant_stat_type & all_results$onset_scale != '25km_Gabriel',]
+      results <- results[order(results$onset_coef),]
+      
+      results <- transform(results, onset_type=reorder(onset_type, -onset_coef) ) 
+      
+      # get the top three results for plotting
+      results_ordered <- results[dim(results)[1]:1,] # so best onset definition is the top row
+      best_onset_coefs <- results_ordered[1:3,'onset_coef']
+      best_onset_def_type_thres <- results_ordered[1:3, 'onset_def_type_thres']
+      
+      # save top five onsets
+      top_onsets <- rbind(top_onsets, data.frame(
+                                                  crop_intensity = rep(crop_intensity, 5),
+                                                  plant_stat_type = rep(plant_stat_type, 5),
+                                                  onset_type = results$onset_type[(nrow(results)-4):nrow(results)]))
+      
+      best_onset_plot <- ggplot(results) +
+        geom_point(aes(x = onset_type, y = onset_coef)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.6)) +
+        ylab('onset coefficient')
+      
+      best_onset_plot_scaleCompare <- ggplot(mapping = aes(x = onset_def_type_thres, y = onset_coef, col = onset_scale), results) +
+        geom_point() +
+        geom_point(mapping = aes(x=best_onset_def_type_thres[1], y=best_onset_coefs[1]), colour="black", shape = 1, size = 7) +
+        geom_point(mapping = aes(x=best_onset_def_type_thres[2], y=best_onset_coefs[2]), colour="black", shape = 1, size = 7) +
+        geom_point(mapping = aes(x=best_onset_def_type_thres[3], y=best_onset_coefs[3]), colour="black", shape = 1, size = 7) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.6)) +
+        ylab('onset coefficient')
+      
+      R2_plot <- ggplot(results) +
+        geom_point(aes(x = onset_type, y = R2), color = "blue") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0, 0.7)) +
+        ylab('R2')
+      
+      moran_i_pval_residual_plot <- ggplot(results) +
+        geom_point(aes(x = onset_type, y = moran_i_pval_residual), color = "black") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(-0.2, 1.2)) +
+        geom_hline(yintercept = 0.05, color = 'red') +
+        ylab('p-val of morans I for residual')
+      
+      moran_i_pval_residual_plot_scaleCompare <- ggplot(results) +
+        geom_point(aes(x = onset_def_type_thres, y = moran_i_pval_residual, col = onset_scale)) +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(-0.2, 1.2)) +
+        geom_hline(yintercept = 0.05, color = 'red') +
+        ylab('p-val of morans I for residual')
+      
+      #print(best_onset_plot)
+      print(best_onset_plot_scaleCompare)
+      #print(R2_plot)
+      print(moran_i_pval_residual_plot_scaleCompare)
+    }
+}
 ```
 
-Plot onset coefficient for each onset x precip x scale
+Freq_10_persiann is best for all DC, and SC-percentile5. Freq_8_chirps is best for SC percentile25 and median, though freq_10_persiann is alright for SC percentile25.
+
+The above suggests that SC, median does a lot better under chirps than persiann, while SC, percentile25 doesn't care much about the precip/scale, and the rest perform better under persiann than chirps. To see if this difference is due to the effect of scale (5 vs 25km) or the effect of data source, did analysis for AA_25 under all three possible precip x scale combinations.
 
 ```{r}
 
-# include error bars for sampling grid location
-# FE model for each intensity and percentile
+results_AA_25 <- all_results[all_results$onset_def_type == 'AA' & all_results$thres == '2.5' & all_results$onset_scale != '25km_persiann',]
+
+ggplot(results_AA_25, aes(x = plant_stat_type, y = onset_coef, col = onset_type)) +
+  geom_point(alpha = 0.9) + 
+  facet_wrap(~ intensity) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) 
 # group the x axis by precip type, scale
 
 # barplots for the most frequently occuring 'top onset' across intensities and percentiles
 
 ```
 
+The difference between chirps and persiann is mainly due to scale difference. When chirps and persiann are aggregated to the same grid, their onset coefficient is very similar. The difference between chirps at 5km and chirps at 25km is much larger, meaning that the scale makes a bigger difference than the precipitation data source. 
+
+
+READ AN INDIVIDUAL ONSET FOR MAPPING
+```{r}
+
+# import data for onset_oi
+onset_oi <- 'freq_10_persiann'
+onset_baseline <- 'AA_25_persiann' # to compare to onset_oi in difference maps, etc
+
+# FOR onset_oi ------------------------------------------------------------------------------------------------------------------------
+# read and clean the data ---------------------------------------------------------------------------------------------------------
+filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi, '/median_onset_cell_', onset_oi , '.csv')
+filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/percentile5_onset_cell_', onset_oi , '.csv')
+filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/percentile25_onset_cell_', onset_oi , '.csv')
+  
+filename_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/shp')
+layername_shp <- paste0('median_onset_cell_SHP_', onset_oi )
+    
+median_cell_raw <- read.csv(filename_median)
+percentile5_cell_raw <- read.csv(filename_percentile5)
+percentile25_cell_raw <- read.csv(filename_percentile25)
+    
+cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+ 
+# CSV DATA -----------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                      rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+  
+  
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+  
+# SF DATA ------------------------------------------------------------------------------------------------
+  
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+  
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+  
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+  
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+  
+cell_sf_percentile25 <- cell_sf
+cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
+  
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+  
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+  
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+  
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+  
+# calculate quantiles of onset
+onset_oi_data <- cell_sf_tidy %>% 
+                    mutate(onset_quantile_allyears = ntile(onset, 10))
+
+# FOR onset_baseline ------------------------------------------------------------------------------------------------------------------
+# read and clean the data ---------------------------------------------------------------------------------------------------------
+filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_baseline, '/median_onset_cell_', onset_baseline , '.csv')
+filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_baseline , '/percentile5_onset_cell_', onset_baseline , '.csv')
+filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_baseline , '/percentile25_onset_cell_', onset_baseline , '.csv')
+  
+filename_shp <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_baseline , '/shp')
+layername_shp <- paste0('median_onset_cell_SHP_', onset_baseline )
+    
+median_cell_raw <- read.csv(filename_median)
+percentile5_cell_raw <- read.csv(filename_percentile5)
+percentile25_cell_raw <- read.csv(filename_percentile25)
+    
+cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
+ 
+# CSV DATA -----------------------------------------------------------------------------------------------
+# median cell
+median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
+                                      rename_cols_median_cell()
+median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+  
+  
+# percentiles
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+  
+# SF DATA ------------------------------------------------------------------------------------------------
+  
+# get cell_ID column for median
+cell_sf$cell_ID <- median_cell$cell_ID
+cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
+  
+# join median, percentile data to cell_sf
+# cell_sf has median information, but copy it and put in percentile info for DC and SC plant
+  
+cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+  
+cell_sf_percentile5 <- cell_sf
+cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
+cell_sf_percentile5$DC_plant <- percentile5_cell$DC_plant
+cell_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(cell_sf_percentile5))
+  
+cell_sf_percentile25 <- cell_sf
+cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
+cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
+cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
+  
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+  
+cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
+            categorize_regions_cell_sf_tidy() # categorize cells into four regions
+  
+cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
+cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
+  
+cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset
+  
+# calculate quantiles of onset
+onset_baseline_data <- cell_sf_tidy %>% 
+                    mutate(onset_quantile_allyears = ntile(onset, 10))
+```
+
 Plot of within-year spatial variability for each onset definition
 
 ```{r}
 
-# boxplot or barplot, year on x axis
+# boxplot
+ggplot(onset_oi_data) +
+  geom_boxplot(aes(x=year_factor, y=onset)) +
+  ggtitle(onset_type) +
+  ylim(0, 130) +
+  theme_bw()
+
+# group by year and onset_type, then calc median and stdev
+onset_data_summarized_eachyear <- onset_oi_data %>% group_by(year_factor) %>%
+                                             summarize(onset_mean = mean(onset),
+                                                   onset_stdev = sd(onset)) %>%
+                                             ungroup()
+
+# barplot
+ggplot(onset_data_summarized_eachyear) +
+  geom_point(aes(x=year_factor, y=onset_stdev)) +
+  ggtitle('Spatial variability over the years') +
+  labs(x = 'year') +
+  ylim(0, 15) +
+  theme_bw()
 
 ```
 
@@ -42,7 +647,47 @@ Map of within-year spatial variability (averaged quantiles through the years) fo
 
 ```{r}
 
+onset_oi_data <- onset_oi_data %>% group_by(year_factor) %>%
+  mutate(onset_quantile_eachyear = ntile(onset, 10))
 
+quantile_maps <- ggplot(onset_oi_data) +
+      geom_sf(aes(fill = onset_quantile_eachyear), color = NA) +
+      #scale_fill_viridis() +
+      scale_fill_gradient(low="black", high="blue") +
+      #scale_fill_brewer(palette="YlOrRd") +
+      ggtitle(paste("Onset quantile for individual years,", onset_type)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", 
+                   alpha = 0, linetype = 1) +
+      facet_wrap(~year_factor) +
+      theme_bw()
+
+print(quantile_maps)
+
+onset_oi_data <- onset_oi_data %>% ungroup()
+
+# calculate time-averaged quantiles
+# get cells from 2004, filter out all other cells from the other years
+cellID_2004 <- onset_oi_data[onset_oi_data$year == 2004, "cell_ID"]
+st_geometry(cellID_2004) <- NULL
+onset_oi_data_subset <- onset_oi_data[onset_oi_data$cell_ID %in% cellID_2004$cell_ID,]
+
+# group by cell_ID and calculate mean onset
+onset_oi_summarized <- onset_oi_data_subset %>% group_by(cell_ID) %>%
+                                             summarize(onset_quantile_median = median(onset_quantile_eachyear),
+                                                   onset_quantile_mean = mean(onset_quantile_eachyear)) %>%
+                                             ungroup()
+
+quantile_map_summary <- ggplot(onset_oi_summarized) +
+      geom_sf(aes(fill = onset_quantile_median), color = NA) +
+      #scale_fill_viridis() +
+      scale_fill_gradient(low="black", high="blue") +
+      #scale_fill_brewer(palette="YlOrRd") +
+      ggtitle(paste("Median onset quantile, all years,", onset_type)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", 
+                   alpha = 0, linetype = 1) +
+      theme_bw()
+
+print(quantile_map_summary)
 
 ```
 
@@ -50,12 +695,151 @@ Map of long-term spatial pattern in differences between onset definitions
 
 ```{r}
 
-# subtract AA definition from the top onset definitions
+# compare onset_oi and onset_baseline
+for (year in 2004:2014) {
+  
+  # onset_oi for given year
+  onset_oi_year <- onset_oi_data[onset_oi_data$year == year,]
+  onset_baseline_year <- onset_baseline_data[onset_baseline_data$year == year,]
+  
+  joined <- st_join(onset_oi_year, onset_baseline_year, largest = TRUE, suffix = c('_oi', '_baseline'))
+  
+  joined$onset_diff <- joined$onset_oi - joined$onset_baseline
+  
+  # assign joined to its own variable, for taking the mean of all onset_diff later
+  
+  result_name <- paste0('onset_diff_', year, '_sf')
+  assign(result_name, joined)
+  
+  onset_diff_plot <- ggplot(joined) +
+        geom_sf(aes(fill = onset_diff), color = NA) +
+        scale_fill_gradient(low="blue", high="red") +
+        ggtitle(paste("Onset difference between", onset_oi, 'and', onset_baseline, year)) +
+        geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black",
+                     alpha = 0, linetype = 1) +
+        theme_bw()
+  
+  onset_oi_plot <- ggplot(onset_oi_year) +
+        geom_sf(aes(fill = onset), color = NA) +
+        #scale_fill_viridis() +
+        scale_fill_gradient(low="black", high="blue") +
+        #scale_fill_brewer(palette="YlOrRd") +
+        ggtitle(paste("Onset,", onset_oi, year)) +
+        geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black",
+                     alpha = 0, linetype = 1) +
+        theme_bw()
+  
+  onset_baseline_plot <- ggplot(onset_baseline_year) +
+        geom_sf(aes(fill = onset), color = NA) +
+        #scale_fill_viridis() +
+        scale_fill_gradient(low="black", high="blue") +
+        #scale_fill_brewer(palette="YlOrRd") +
+        ggtitle(paste("Onset,", onset_baseline, year)) +
+        geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black",
+                     alpha = 0, linetype = 1) +
+        theme_bw()
+  
+  print(onset_diff_plot)
+  print(onset_oi_plot)
+  print(onset_baseline_plot)
+}
+```
 
-# subtract the top onset definitions from each other
+Join all the years into one dataframe, then take the mean across the columns. Do this stepwise (adding on year by year)
+```{r}
 
-# subtract, within a single onset definition, the result of using different thresholds
+# spatial join the onset_diff_2004_sf, etc to calculate the mean difference
 
+joined_2years <- st_join(onset_diff_2004_sf, onset_diff_2005_sf, largest = TRUE, suffix = c('_2004', '_2005'))
+joined_2years <- joined_2years[,c('onset_diff_2004', 'onset_diff_2005')]
+
+
+```
+
+```{r}
+joined_3years <- st_join(joined_2years, onset_diff_2006_sf, largest = TRUE)
+joined_3years['onset_diff_2006'] <- joined_3years['onset_diff']
+joined_3years <- joined_3years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006')]
+```
+
+```{r}
+joined_4years <- st_join(joined_3years, onset_diff_2007_sf, largest = TRUE)
+joined_4years['onset_diff_2007'] <- joined_4years['onset_diff']
+joined_4years <- joined_4years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007')]
+```
+
+```{r}
+joined_5years <- st_join(joined_4years, onset_diff_2008_sf, largest = TRUE)
+joined_5years['onset_diff_2008'] <- joined_5years['onset_diff']
+joined_5years <- joined_5years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008')]
+```
+
+```{r}
+joined_6years <- st_join(joined_5years, onset_diff_2009_sf, largest = TRUE)
+joined_6years['onset_diff_2009'] <- joined_6years['onset_diff']
+joined_6years <- joined_6years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009')]
+```
+
+```{r}
+joined_7years <- st_join(joined_6years, onset_diff_2010_sf, largest = TRUE)
+joined_7years['onset_diff_2010'] <- joined_7years['onset_diff']
+joined_7years <- joined_7years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009', 'onset_diff_2010')]
+```
+
+```{r}
+joined_8years <- st_join(joined_7years, onset_diff_2011_sf, largest = TRUE)
+joined_8years['onset_diff_2011'] <- joined_8years['onset_diff']
+joined_8years <- joined_8years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009', 'onset_diff_2010',
+                                  'onset_diff_2011')]
+```
+
+```{r}
+joined_9years <- st_join(joined_8years, onset_diff_2012_sf, largest = TRUE)
+joined_9years['onset_diff_2012'] <- joined_9years['onset_diff']
+joined_9years <- joined_9years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009', 'onset_diff_2010',
+                                  'onset_diff_2011', 'onset_diff_2012')]
+```
+
+```{r}
+joined_10years <- st_join(joined_9years, onset_diff_2013_sf, largest = TRUE)
+joined_10years['onset_diff_2013'] <- joined_10years['onset_diff']
+joined_10years <- joined_10years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009', 'onset_diff_2010',
+                                  'onset_diff_2011', 'onset_diff_2012', 'onset_diff_2013')]
+```
+
+```{r}
+joined_11years <- st_join(joined_10years, onset_diff_2014_sf, largest = TRUE)
+joined_11years['onset_diff_2014'] <- joined_11years['onset_diff']
+joined_11years <- joined_11years[,c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009', 'onset_diff_2010',
+                                  'onset_diff_2011', 'onset_diff_2012', 'onset_diff_2013', 'onset_diff_2014')]
+```
+
+```{r}
+
+mean_of_rows <- function(row) {
+  data <- row[c('onset_diff_2004', 'onset_diff_2005', 'onset_diff_2006', 'onset_diff_2007', 'onset_diff_2008', 'onset_diff_2009', 'onset_diff_2010',
+                                  'onset_diff_2011', 'onset_diff_2012', 'onset_diff_2013', 'onset_diff_2014')]
+  
+  #st_geometry(data) <- NULL
+  data <- as.numeric(as.vector(data))
+  
+  return(mean(data, na.rm = TRUE))
+}
+
+mean_onset_diff <- apply(joined_11years, 1, mean_of_rows) 
+
+# add mean_onset_diff to sf for mapping
+joined_11years['mean_onset_diff'] <- mean_onset_diff
+
+mean_onset_diff_plot <- ggplot(joined_11years) +
+        geom_sf(aes(fill = mean_onset_diff), color = NA) +
+        scale_fill_gradient(low="blue", high="red") +
+        ggtitle(paste("Onset diff bet", onset_oi, 'and', onset_baseline, 'all years')) +
+        geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black",
+                     alpha = 0, linetype = 1) +
+        theme_bw()
+
+print(mean_onset_diff_plot)
 ```
 
 Timeseries of onset, averaged over space
@@ -64,35 +848,91 @@ Timeseries of onset, averaged over space
 
 # error bars for spatial variability?
 
+# group by year and onset_type, then calc median and stdev
+onset_oi_summarized_eachyear <- onset_oi_data %>% group_by(year_factor) %>%
+                                             summarize(onset_mean = mean(onset),
+                                                   onset_stdev = sd(onset)) %>%
+                                             ungroup()
+
+onset_baseline_summarized_eachyear <- onset_baseline_data %>% group_by(year_factor) %>%
+                                             summarize(onset_mean = mean(onset),
+                                                   onset_stdev = sd(onset)) %>%
+                                             ungroup()
+
+st_geometry(onset_oi_summarized_eachyear) <- NULL
+st_geometry(onset_baseline_summarized_eachyear) <- NULL
+
+onset_oi_summarized_eachyear$onset_type <- onset_oi
+onset_baseline_summarized_eachyear$onset_type <- onset_baseline
+
+onset_summarized <- rbind(onset_oi_summarized_eachyear, onset_baseline_summarized_eachyear)
+onset_summarized$year <- as.numeric(onset_summarized$year_factor)
+
+# timeseries plot
+ggplot(onset_summarized) +
+  geom_line(aes(x=year, y=onset_mean, col = onset_type)) +
+  #geom_errorbar(aes(ymin=onset_mean-onset_stdev, ymax=onset_mean+onset_stdev, x = year_factor, col = onset_type)) +
+  ggtitle('Mean onset') +
+  labs(x = 'year') +
+  ylim(20, 80) +
+  theme_bw()
+
 ```
 
 Robustness tests
 
 ```{r}
 
-# eliminated predictors: repeat the OLS and FE specifications with eliminated predictors for the chosen onset definition. report onset coefficient for each intensity, percentile
+# eliminated predictors: repeat FE specification with eliminated predictors for the chosen onset definition. report onset coefficient for each intensity, percentile
 
-# summarize uncertainty in onset coef as a standard deviation
+elimpred_results <- data.frame(intensity = character(0), percentile = character(0),
+                               onset_coef = numeric(0), onset_stderr = numeric(0), 
+                               model_type = character(0))
 
-# two-group t-test comparing onset coefficients for different onset definitions, cropping intensities, and percentiles
-# calc onset coef difference t-test between SC and DC for each onset def, percentile
-# calc onset coef difference t-test between onset definitions, for each percentile and intenssity
-# calc onset coef difference t-test between percentiles, for each onset definition
+for (intensity in c("SC", "DC")) {
+    for (percentile in c('percentile5', 'percentile25', 'median')) {
 
+      data_subset <- onset_oi_data[(onset_oi_data$plant_stat_type == percentile) & (onset_oi_data$intensity == intensity), ]
+      data_subset_panel <- pdata.frame(data_subset, index = c("cell_ID"))
+          
+      fe_model <- plm(plant ~ onset + year, data = data_subset_panel, model = "within")
+      fe_model_elimpred <- plm(plant ~ onset, data = data_subset_panel, model = "within")
+      
+      ols_model <- lm(plant ~ onset + year + lat + lon + region, data = data_subset)
+      ols_model_elimpred <- lm(plant ~ onset, data = data_subset)
+      
+      # get coefficients
+      fe_onset_coef <- fe_model$coefficients["onset"]
+      fe_elimpred_onset_coef <- fe_model_elimpred$coefficients["onset"]
+      ols_onset_coef <- ols_model$coefficients["onset"]
+      ols_elimpred_onset_coef <- ols_model_elimpred$coefficients["onset"]
+      
+      fe_onset_stderr <- summary(fe_model)$coefficients['onset', 'Std. Error']
+      fe_elimpred_onset_stderr <- summary(fe_model_elimpred)$coefficients['onset', 'Std. Error']
+      ols_onset_stderr <- summary(ols_model)$coefficients['onset', 'Std. Error']
+      ols_elimpred_onset_stderr <- summary(ols_model_elimpred)$coefficients['onset', 'Std. Error']
+      
+      results <- data.frame(intensity = rep(intensity, 4), percentile = rep(percentile, 4),
+                            onset_coef = c(fe_onset_coef, fe_elimpred_onset_coef,
+                                           ols_onset_coef, ols_elimpred_onset_coef),
+                            onset_stderr = c(fe_onset_stderr, fe_elimpred_onset_stderr,
+                                             ols_onset_stderr, ols_elimpred_onset_stderr),
+                            model_type = c('fe', 'fe_elimpred', 'ols', 'ols_elimpred'))
+      
+      elimpred_results <- rbind(elimpred_results, results)
+    }
+}
+
+print(elimpred_results)
+
+# different degrees of eliminated predictors on x axis, and onset coef on y axis
+
+elimpred_plot <- ggplot(elimpred_results) +
+  geom_point(aes(x = model_type, y = onset_coef)) +
+  geom_errorbar(aes(ymin=onset_coef-onset_stderr, ymax=onset_coef+onset_stderr, x = model_type)) +
+  facet_wrap(intensity ~ percentile) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+
+print(elimpred_plot)
 ```
-
-Plot of onset coefficient sensitivity to eliminated predictors
-
-```{r}
-
-# different degrees of elimianted predictors on x axis, and onset coef on y axis
-
-```
-
-Plot of onset coefficients for different onset definitions, intensities, and percentiles
-
-```{r}
-
-```
-
-
