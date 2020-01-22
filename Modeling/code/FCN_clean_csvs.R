@@ -13,6 +13,7 @@ delete_cols_median_cell <- function(median_cell_raw) {
   return(output)
 }
 
+
 rename_cols_median_cell <- function(median_cell) {
   output = median_cell %>% 
     dplyr::rename(

@@ -104,6 +104,7 @@ plant_stat_types <- c('median', 'percentile5', 'percentile25')
 
 ```
 
+RUN ONLY ONCE:
 Run FE model and save results
 
 ```{r}
@@ -342,6 +343,7 @@ for (onset_type in all_onset_types) {
 
 Load FE model results (from FE, using all data, i.e. no spatial sampling)
 
+
 ```{r}
 
 # empty data frame to store results
@@ -483,10 +485,11 @@ The difference between chirps and persiann is mainly due to scale difference. Wh
 
 
 READ AN INDIVIDUAL ONSET FOR MAPPING
+
 ```{r}
 
 # import data for onset_oi
-onset_oi <- 'freq_10_persiann'
+onset_oi <- 'freq_10_persiann'#'freq_10_persiann'
 onset_baseline <- 'AA_25_persiann' # to compare to onset_oi in difference maps, etc
 
 # FOR onset_oi ------------------------------------------------------------------------------------------------------------------------
@@ -623,7 +626,7 @@ Plot of within-year spatial variability for each onset definition
 # boxplot
 ggplot(onset_oi_data) +
   geom_boxplot(aes(x=year_factor, y=onset)) +
-  ggtitle(onset_type) +
+  ggtitle(onset_oi) +
   ylim(0, 130) +
   theme_bw()
 
@@ -636,7 +639,7 @@ onset_data_summarized_eachyear <- onset_oi_data %>% group_by(year_factor) %>%
 # barplot
 ggplot(onset_data_summarized_eachyear) +
   geom_point(aes(x=year_factor, y=onset_stdev)) +
-  ggtitle('Spatial variability over the years') +
+  ggtitle(paste('Spatial variability over the years', onset_oi)) +
   labs(x = 'year') +
   ylim(0, 15) +
   theme_bw()
