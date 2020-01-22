@@ -64,13 +64,19 @@ filename_cell_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset
                                  '/percentile5_onset_cell_', onset_type, '.csv')
 filename_cell_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
                                   '/percentile25_onset_cell_', onset_type, '.csv')
-                                     
+filename_cell_percentile75 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                                  '/percentile75_onset_cell_', onset_type, '.csv')
+filename_cell_percentile95 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                                  '/percentile95_onset_cell_', onset_type, '.csv')
+
 filename_cell_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
 layername_cell_shp <- paste0('median_onset_cell_SHP_', onset_type)
 
 median_cell_raw <- read.csv(filename_cell_median)
 percentile5_cell_raw <- read.csv(filename_cell_percentile5)
 percentile25_cell_raw <- read.csv(filename_cell_percentile25)
+percentile75_cell_raw <- read.csv(filename_cell_percentile75)
+percentile95_cell_raw <- read.csv(filename_cell_percentile95)
 
 cell_sf <- st_read(dsn = filename_cell_shp, layer = layername_cell_shp)
 
@@ -82,6 +88,8 @@ median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
 median_cell$plant_stat_type <- rep('median', nrow(median_cell))
 percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
 percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
+percentile75_cell <- percentile75_cell_raw %>% rename_cols_percentile_cell()
+percentile95_cell <- percentile95_cell_raw %>% rename_cols_percentile_cell()
 
 # sf data 
 
@@ -108,7 +116,17 @@ cell_sf_percentile25$SC_plant <- percentile25_cell$SC_plant
 cell_sf_percentile25$DC_plant <- percentile25_cell$DC_plant
 cell_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(cell_sf_percentile25))
 
-cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25)
+cell_sf_percentile75 <- cell_sf
+cell_sf_percentile75$SC_plant <- percentile75_cell$SC_plant
+cell_sf_percentile75$DC_plant <- percentile75_cell$DC_plant
+cell_sf_percentile75$plant_stat_type <- rep("percentile75", nrow(cell_sf_percentile75))
+
+cell_sf_percentile95 <- cell_sf
+cell_sf_percentile95$SC_plant <- percentile95_cell$SC_plant
+cell_sf_percentile95$DC_plant <- percentile95_cell$DC_plant
+cell_sf_percentile95$plant_stat_type <- rep("percentile95", nrow(cell_sf_percentile95))
+
+cell_sf <- rbind(cell_sf, cell_sf_percentile5, cell_sf_percentile25, cell_sf_percentile75, cell_sf_percentile95)
 
 cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
             dplyr::select(-c(SC_harvest, DC_harvest)) %>%
@@ -182,6 +200,8 @@ CARpoly_sf_tidy <- CARpoly_sf_tidy %>%  drop_na
 CARpoly_sf_tidy$delay <- CARpoly_sf_tidy$plant - CARpoly_sf_tidy$onset 
 
 ```
+
+Muni data
 
 ```{r}
 
@@ -518,7 +538,7 @@ temp_autocorr_alldata <- data.frame(model = character(0), p_value = numeric(0),
 
 # OLS
 for (intensity in c('SC', 'DC')) {
-  for (percentile in c('median', 'percentile5', 'percentile25')) {
+  for (percentile in c('median', 'percentile5', 'percentile25', 'percentile75', 'percentile95')) {
 
     # OLS
     data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == intensity) & (cell_sf_tidy$plant_stat_type == percentile), ]
@@ -592,7 +612,7 @@ for (intensity in c('SC', 'DC')) {
 
 # FE
 for (intensity in c('SC', 'DC')) {
-  for (percentile in c('median', 'percentile5', 'percentile25')) {
+  for (percentile in c('median', 'percentile5', 'percentile25', 'percentile75', 'percentile95')) {
     
     data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == intensity) & (cell_sf_tidy$plant_stat_type == percentile), ]
     data_subset_panel <- pdata.frame(data_subset,index = c("cell_ID"))
@@ -1386,7 +1406,7 @@ model_evaluation <- data.frame(intensity = character(0), percentile = character(
                                )
 
 for (intensity in c("DC", "SC")) {
-  for (percentile in c("percentile5", "percentile25", "median")) {
+  for (percentile in c("percentile5", "percentile25", "median", "percentile75", "percentile95")) {
     cell_df <- cell_sf_tidy
     st_geometry(cell_df) <- NULL
     
@@ -1490,7 +1510,9 @@ for (intensity in c("DC", "SC")) {
     
     # residual vs fitted value plot (look for no pattern and constant variance) --------------------
     plot(x = as.numeric(data_subset$fitted.values), y = as.numeric(data_subset$residuals), 
-         main = paste("fitted values vs residuals", intensity, percentile))
+         main = paste("fitted values vs residuals", intensity, percentile), 
+         xlab = 'fitted value', ylab = 'residual')
+    abline(h = 0, col = 'red')
     
     # residual vs index (look for no pattern) ------------------------------------------------------
     plot(as.numeric(data_subset$residuals), main = paste("residual vs index", intensity, percentile))
@@ -1519,7 +1541,7 @@ Map of fixed effects that were estimated
 # try year_index to get 
 # use all cells for the FE model; produce maps for SC and DC separately
 for (intensity in c("DC", "SC")) {
-  for (percentile in c("percentile5", "percentile25", "median")) {
+  for (percentile in c("percentile5", "percentile25", "median", "percentile75", "percentile95")) {
     
     cell_df <- cell_sf_tidy
     st_geometry(cell_df) <- NULL
@@ -1562,7 +1584,7 @@ Map of residual for OLS and FE (can't do predictive error map for FE)
 # residual map: use all cells for OLS and FE models; produce maps for SC and DC separately ----------------------------
 
 for (intensity in c("SC", "DC")) {
-  for (percentile in c('percentile5', 'percentile25', 'median')) {
+  for (percentile in c('percentile5', 'percentile25', 'median', 'percentile75', 'percentile95')) {
     cell_df <- cell_sf_tidy
     st_geometry(cell_df) <- NULL
         
@@ -1604,7 +1626,7 @@ for (intensity in c("SC", "DC")) {
 elim_year = 2010
 
 for (intensity in c("SC", "DC")) {
-  for (percentile in c('percentile5', 'percentile25', 'median')) {
+  for (percentile in c('percentile5', 'percentile25', 'median', 'percentile75', 'percentile95')) {
     
     # eliminate a year and test it; model_type is ols or rf or fe
     train_elimyear <- data_subset[data_subset$year != elim_year,]
@@ -1691,7 +1713,7 @@ for (n in 1:n_data_bootstrap) {
   
   # Step 2. split by intensity, percentile
   for (intensity in c("SC", "DC")) {
-    for (percentile in c('percentile5', 'percentile25', 'median')) {
+    for (percentile in c('percentile5', 'percentile25', 'median', 'percentile75', 'percentile95')) {
       
 
       bs_data_subset <- bs_cell_df[(bs_cell_df$plant_stat_type == percentile) & (bs_cell_df$intensity == intensity), ]
@@ -1736,7 +1758,7 @@ year_coefs_list <- vector("list", 6)
 
 list_index <- 0
 for (intensity in c("SC", "DC")) {
-  for (percentile in c('percentile5', 'percentile25', 'median')) {
+  for (percentile in c('percentile5', 'percentile25', 'median', 'percentile75', 'percentile95')) {
     
     list_index <- list_index + 1
 
@@ -1760,8 +1782,14 @@ for (intensity in c("SC", "DC")) {
   }
 }
 
-names(onset_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 'DC_percentile5', 'DC_percentile25', 'DC_median')
-names(year_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 'DC_percentile5', 'DC_percentile25', 'DC_median')
+names(onset_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 
+                             'SC_percentile75', 'SC_percentile95', 
+                             'DC_percentile5', 'DC_percentile25', 'DC_median',
+                             'DC_percentile75', 'DC_percentile95')
+names(year_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 
+                            'SC_percentile75', 'SC_percentile95',
+                            'DC_percentile5', 'DC_percentile25', 'DC_median',
+                            'DC_percentile75', 'DC_percentile95')
 
 # compare coefs across intensities and groups
 diff_intensities_median <- t.test(onset_coefs_list[['SC_median']], onset_coefs_list[['DC_median']])$p.value
@@ -1785,4 +1813,13 @@ print(paste(diff_percentile25_50_SC, diff_percentile25_50_DC))
 
 print(final_bootstrap_coefs)
 
+coef_plot <- ggplot(final_bootstrap_coefs) +
+  geom_point(aes(x = percentile, y = onset_coef)) + 
+  geom_errorbar(aes(ymin=onset_coef-onset_sderr, ymax=onset_coef+onset_sderr, x = percentile)) +
+  facet_wrap(~ intensity) +
+  ggtitle(paste('Bootstrapped onset coefficients with', onset_type)) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) 
+
+print(coef_plot)
 ```
