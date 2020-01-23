@@ -478,7 +478,21 @@ for (crop_intensity in c("SC", "DC")) {
 }
 ```
 
+
 Freq_10_persiann is best for all DC, and SC-percentile5. Freq_8_chirps is best for SC percentile25 and median, though freq_10_persiann is alright for SC percentile25.
+
+
+
+Find the best onset definition within each onset_def_type_thres, across precip data sources, intensities and percentiles
+```{r}
+
+grouped_results <- all_results %>% group_by(onset_def_type_thres, precip_data) %>%
+  summarize(mean_onset_coef = mean(onset_coef))
+
+grouped_results <- grouped_results[order(-grouped_results$mean_onset_coef),]
+
+print(grouped_results)
+```
 
 The above suggests that SC, median does a lot better under chirps than persiann, while SC, percentile25 doesn't care much about the precip/scale, and the rest perform better under persiann than chirps. To see if this difference is due to the effect of scale (5 vs 25km) or the effect of data source, did analysis for AA_25 under all three possible precip x scale combinations.
 

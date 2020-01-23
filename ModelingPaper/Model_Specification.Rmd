@@ -282,9 +282,9 @@ RUN FOR EACH PLANTING PERCENTILE (5, 25, 50; HERE, DON'T HAVE 25 BUT HAVE 95)
 # Run OLS model with (1) all data points, (2) year, onset, lat, lon, for (3) the chosen onset, (4) at each observation scale (cell 25km, CARpoly, muni) and (5) each planting percentile
 # Return R2 for each observation scale
 
-model_CARpoly_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
-model_CARpoly_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
-model_CARpoly_percentile95 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
+# model_CARpoly_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
+# model_CARpoly_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
+# model_CARpoly_percentile95 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
 
 model_cell_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = cell_sf_tidy)
 model_cell_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = cell_sf_tidy)
@@ -294,9 +294,9 @@ model_muni_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_sta
 model_muni_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = muni_sf_tidy)
 model_muni_percentile95 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = muni_sf_tidy)
 
-R2_CARpoly_median <- summary(model_CARpoly_median)$r.squared
-R2_CARpoly_percentile5 <- summary(model_CARpoly_percentile5)$r.squared
-R2_CARpoly_percentile95 <- summary(model_CARpoly_percentile95)$r.squared
+# R2_CARpoly_median <- summary(model_CARpoly_median)$r.squared
+# R2_CARpoly_percentile5 <- summary(model_CARpoly_percentile5)$r.squared
+# R2_CARpoly_percentile95 <- summary(model_CARpoly_percentile95)$r.squared
 
 R2_cell_median <- summary(model_cell_median)$r.squared
 R2_cell_percentile5 <- summary(model_cell_percentile5)$r.squared
@@ -306,21 +306,21 @@ R2_muni_median <- summary(model_muni_median)$r.squared
 R2_muni_percentile5 <- summary(model_muni_percentile5)$r.squared
 R2_muni_percentile95 <- summary(model_muni_percentile95)$r.squared
 
-print(paste('R2 for median (CARpoly, cell, and muni):', R2_CARpoly_median, R2_cell_median, R2_muni_median))
-print(paste('R2 for percentile5 (CARpoly, cell, and muni):', R2_CARpoly_percentile5, R2_cell_percentile5, R2_muni_percentile5))
-print(paste('R2 for percentile95 (CARpoly, cell, and muni):', R2_CARpoly_percentile95, R2_cell_percentile95, R2_muni_percentile95))
+print(paste('R2 for median (CARpoly, cell, and muni):', R2_cell_median, R2_muni_median)) # R2_CARpoly_median, 
+print(paste('R2 for percentile5 (CARpoly, cell, and muni):',  R2_cell_percentile5, R2_muni_percentile5)) #R2_CARpoly_percentile5,
+print(paste('R2 for percentile95 (CARpoly, cell, and muni):',  R2_cell_percentile95, R2_muni_percentile95)) # R2_CARpoly_percentile95,
 
 # Criteria 2: variability of planting date
 for (intensity in c('SC', 'DC')) {
   for (percentile in c('plant_median', 'plant_percentile5', 'plant_percentile95')) {
-    sd_CARpoly = sd(CARpoly_sf_tidy[CARpoly_sf_tidy$intensity == intensity, percentile], na.rm = TRUE)
+    #sd_CARpoly = sd(CARpoly_sf_tidy[CARpoly_sf_tidy$intensity == intensity, percentile], na.rm = TRUE)
     sd_cell = sd(cell_sf_tidy[cell_sf_tidy$intensity == intensity, percentile], na.rm = TRUE)
     sd_muni = sd(muni_sf_tidy[muni_sf_tidy$intensity == intensity, percentile], na.rm = TRUE)
     
     print('--------------------')
     print(percentile)
     print(intensity)
-    print(paste('CAR poly', intensity, percentile, 'planting date std: ', sd_CARpoly))
+    #print(paste('CAR poly', intensity, percentile, 'planting date std: ', sd_CARpoly))
     print(paste('cell', intensity, percentile, 'planting date std: ', sd_cell))
     print(paste('muni', intensity, percentile, 'planting date std: ', sd_muni))
   }
@@ -338,34 +338,41 @@ NOTE, DO MUNI AND CARPOLY EXTRACTIONS AND THEN MAP. MAYBE ZOOM IN ON A REGION FO
 ```{r}
 
 year_oi <- 2012 # to map
-intensity_oi <- "DC" # to map
+intensity_oi <- "SC" # to map
+percentile_oi <- "median"
 
 
 # filter a specific year
 cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi) %>%
-                                   filter(intensity == intensity_oi)
+                                   filter(intensity == intensity_oi) %>%
+                                   filter(plant_stat_type == percentile_oi)
 muni_sf_tidy_year <- muni_sf_tidy %>% filter(year == year_oi) %>%
-                                   filter(intensity == intensity_oi)
+                                   filter(intensity == intensity_oi) %>%
+                                   filter(plant_stat_type == percentile_oi)
 
 ggplot(cell_sf_tidy_year) +
   geom_sf(aes(fill = plant)) + # , colour = NA) +
+  scale_fill_viridis(limits = c(50, 150)) +
+  ggtitle(paste("Cell median planting date", year_oi, intensity_oi, percentile_oi)) +
+  geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+ggplot(cell_sf_tidy_year) +
+  geom_sf(aes(fill = onset)) + # , colour = NA) +
   scale_fill_viridis() +
-  ggtitle(paste("Cell median planting date", year_oi, intensity_oi)) +
+  ggtitle(paste("Onset", year_oi)) +
   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
   theme_bw()
 
 ggplot(muni_sf_tidy_year) +
   geom_sf(aes(fill = plant)) + #, colour = NA) +
   scale_fill_viridis() +
-  ggtitle(paste("Muni median planting date", year_oi, intensity_oi)) +
+  ggtitle(paste("Muni median planting date", year_oi, intensity_oi, percentile_oi)) +
   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
   theme_bw()
 ```
 
 Choose predictors, using all data points and only cell scale and the chosen onset definition
-
-TO DO 
-EXTRACT ONSET_HISTORICALRANGE AND TEST
 
 ```{r}
 
@@ -520,7 +527,6 @@ selected_OLS_model <- lm(plant ~ onset + plant_stat_type + intensity + year_inde
 print('OLS with selected predictors + interesting interaction variables')
 print(summary(selected_OLS_model))
 ```
-
 
 Spatial and temporal autocorrelation (separate model for each intensity and percentile) - for all data
 
@@ -1822,4 +1828,7 @@ coef_plot <- ggplot(final_bootstrap_coefs) +
   theme(axis.text.x = element_text(angle = 90)) 
 
 print(coef_plot)
+
+# SAVED RESULTS
+saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
 ```
