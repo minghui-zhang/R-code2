@@ -486,7 +486,9 @@ Freq_10_persiann is best for all DC, and SC-percentile5. Freq_8_chirps is best f
 Find the best onset definition within each onset_def_type_thres, across precip data sources, intensities and percentiles
 ```{r}
 
-grouped_results <- all_results %>% group_by(onset_def_type_thres, precip_data) %>%
+grouped_results <- all_results %>% 
+  filter(plant_stat_type %in% c('percentile25', 'median', 'percentile75')) %>% 
+           group_by(onset_def_type_thres, precip_data) %>%
   summarize(mean_onset_coef = mean(onset_coef))
 
 grouped_results <- grouped_results[order(-grouped_results$mean_onset_coef),]

@@ -27,7 +27,7 @@ library(Metrics)
 library(randomForest)
 
 # select the onset definition
-onset_type <- 'freq_10_persiann' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+onset_type <- 'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
 
 # import data for all sections
 os_system <- 'windows' # mac for laptop or windows for desktop
@@ -102,6 +102,13 @@ clean_cell_ID <- function(cell_ID) {
 cell_sf$cell_ID <- median_cell$cell_ID
 cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
 
+# at this point, cell_sf has same number of rows in each year. add the previous year's onset, using NA for 2004
+cells_per_year <- nrow(cell_sf[cell_sf$year == 2004,])
+prev_year_onsets <- cell_sf[cell_sf$year <= 2013, 'onset']
+st_geometry(prev_year_onsets) <- NULL
+cell_sf$prev_onset <- c(rep(NA, cells_per_year), prev_year_onsets$onset)
+
+
 # join median, percentile data to cell_sf
 # cell_sf has median information, but copy it and put in percentile info for DC and SC plant
 cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
@@ -135,69 +142,48 @@ cell_sf_tidy <- cell_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
 cell_sf_tidy$year_index <- cell_sf_tidy$year - 2003
 cell_sf_tidy$year_factor <- as.factor(cell_sf_tidy$year)
 
-cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+#cell_sf_tidy <- cell_sf_tidy %>%  drop_na
+cell_sf_tidy <- cell_sf_tidy[!is.na(cell_sf_tidy$plant),]
+
 cell_sf_tidy$delay <- cell_sf_tidy$plant - cell_sf_tidy$onset 
+
+# NOTE: the followign works but is slow, did it another way above
+# # add previous year's onset; if 2004, use 2004's onset
+# get_prev_onset <- function(row) {
+#   curr_year <- row$year
+#   cell_ID_oi <- row$cell_ID
+# 
+#   if (curr_year == 2004) {return(NA)}
+#   if (curr_year != 2004) {prev_year <- curr_year - 1}
+# 
+#   prev_onset <- cell_sf_tidy[cell_sf_tidy$year == prev_year & cell_sf_tidy$cell_ID == cell_ID_oi, 'onset']
+#   st_geometry(prev_onset) <- NULL
+# 
+#   return(prev_onset[1, 'onset'])
+# }
+# 
+# cell_sf_tidy$prev_onset <- apply(cell_sf_tidy, 1, get_prev_onset)
 ```
 
 CAR poly data
+NOTE, couldn't get spatial data or export csv data using onset_type; this is for AA_25_gabriel
 
 ```{r}
 
-# import data
-filename_CARpoly_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
-                            '/median_CARpoly_', onset_type, '.csv')
-filename_CARpoly_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
-                                 '/percentile5_CARpoly_', onset_type, '.csv')
-filename_CARpoly_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
-                                  '/percentile25_CARpoly_', onset_type, '.csv')
+median_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/median_CARpoly_v2.csv')
+percentile5_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
+percentile95_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
 
-filename_CARpoly_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
-layername_cell_shp <- paste0('median_CARpoly_SHP_', onset_type)
+median_CARpoly_raw <- rename_cols_median_CARpoly(median_CARpoly_raw)
+percentile5_CARpoly_raw <- rename_cols_percentile5_CARpoly(percentile5_CARpoly_raw)
+percentile95_CARpoly_raw <- rename_cols_percentile95_CARpoly(percentile95_CARpoly_raw)
+CARpoly_raw <- create_CARpoly_raw(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw)
 
-median_CARpoly_raw <- read.csv(filename_CARpoly_median)
-percentile5_CARpoly_raw <- read.csv(filename_CARpoly_percentile5)
-percentile25_CARpoly_raw <- read.csv(filename_CARpoly_percentile25)
+CARpoly_tidy <- tidy_CARpoly(CARpoly_raw)
 
-CARpoly_sf <- st_read(dsn = filename_CARpoly_shp, layer = layername_CARpoly_shp)
-
-# clean data -----------------
-median_CARpoly <- median_CARpoly_raw %>% delete_cols_median_CARpoly() %>%
-                                    rename_cols_median_CARpoly() #rename_cols_median_CARpoly(median_CARpoly_raw)
-percentile5_CARpoly <- percentile5_CARpoly_raw %>% rename_cols_percentile5_CARpoly() #rename_cols_percentile5_CARpoly(percentile5_CARpoly_raw)
-percentile95_CARpoly <- percentile25_CARpoly_raw %>% rename_cols_percentile25_CARpoly() #rename_cols_percentile95_CARpoly(percentile95_CARpoly_raw)
-#CARpoly_raw <- create_CARpoly_raw(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw)
-
-# CARpoly_tidy <- tidy_CARpoly(CARpoly_raw)
-# 
-# CARpoly_tidy <- categorize_vars_CARpoly_tidy(CARpoly_tidy) %>% delete_cols_CARpoly_tidy()
-# CARpoly_untidy <- categorize_vars_CARpoly_untidy(CARpoly_raw) 
-# # change rename cols and delete unnecessary cols
-# CARpoly_untidy <- CARpoly_untidy %>% rename_cols_CARpoly_untidy() %>%
-#                                     delete_cols_CARpoly_untidy()
-
-CARpoly_sf$plant_stat_type <- rep("median", nrow(CARpoly_sf))
-
-CARpoly_sf_percentile5 <- CARpoly_sf
-CARpoly_sf_percentile5$SC_plant <- percentile5_CARpoly$SC_plant
-CARpoly_sf_percentile5$DC_plant <- percentile5_CARpoly$DC_plant
-CARpoly_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(CARpoly_sf_percentile5))
-
-CARpoly_sf_percentile25 <- CARpoly_sf
-CARpoly_sf_percentile25$SC_plant <- percentile25_CARpoly$SC_plant
-CARpoly_sf_percentile25$DC_plant <- percentile25_CARpoly$DC_plant
-CARpoly_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(CARpoly_sf_percentile25))
-
-CARpoly_sf <- rbind(CARpoly_sf, CARpoly_sf_percentile5, CARpoly_sf_percentile25)
-
-CARpoly_sf_tidy <- CARpoly_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
-            dplyr::select(-c(SC_harvest, DC_harvest)) %>%
-            categorize_regions_CARpoly_sf_tidy() # categorize cells into four regions
-
-CARpoly_sf_tidy$year_index <- CARpoly_sf_tidy$year - 2003
-CARpoly_sf_tidy$year_factor <- as.factor(CARpoly_sf_tidy$year)
-
-CARpoly_sf_tidy <- CARpoly_sf_tidy %>%  drop_na
-CARpoly_sf_tidy$delay <- CARpoly_sf_tidy$plant - CARpoly_sf_tidy$onset 
+CARpoly_tidy <- categorize_vars_CARpoly_tidy(CARpoly_tidy) %>% delete_cols_CARpoly_tidy()
+CARpoly_tidy$year_index <- CARpoly_tidy$year - 2003
+CARpoly_tidy$year_factor <- CARpoly_tidy$year %>% as.factor()
 
 ```
 
@@ -282,9 +268,9 @@ RUN FOR EACH PLANTING PERCENTILE (5, 25, 50; HERE, DON'T HAVE 25 BUT HAVE 95)
 # Run OLS model with (1) all data points, (2) year, onset, lat, lon, for (3) the chosen onset, (4) at each observation scale (cell 25km, CARpoly, muni) and (5) each planting percentile
 # Return R2 for each observation scale
 
-# model_CARpoly_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
-# model_CARpoly_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
-# model_CARpoly_percentile95 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = CARpoly_sf_tidy)
+model_CARpoly_median <- lm(plant_median ~ onset + year_index + latitude + longitude + intensity, data = CARpoly_tidy)
+model_CARpoly_percentile5 <- lm(plant_percentile5 ~ onset + year_index + latitude + longitude + intensity , data = CARpoly_tidy)
+model_CARpoly_percentile95 <- lm(plant_percentile95 ~ onset + year_index + latitude + longitude + intensity, data = CARpoly_tidy)
 
 model_cell_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = cell_sf_tidy)
 model_cell_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = cell_sf_tidy)
@@ -294,9 +280,9 @@ model_muni_median <- lm(plant ~ onset + year + lat + lon + intensity + plant_sta
 model_muni_percentile5 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = muni_sf_tidy)
 model_muni_percentile95 <- lm(plant ~ onset + year + lat + lon + intensity + plant_stat_type, data = muni_sf_tidy)
 
-# R2_CARpoly_median <- summary(model_CARpoly_median)$r.squared
-# R2_CARpoly_percentile5 <- summary(model_CARpoly_percentile5)$r.squared
-# R2_CARpoly_percentile95 <- summary(model_CARpoly_percentile95)$r.squared
+R2_CARpoly_median <- summary(model_CARpoly_median)$r.squared
+R2_CARpoly_percentile5 <- summary(model_CARpoly_percentile5)$r.squared
+R2_CARpoly_percentile95 <- summary(model_CARpoly_percentile95)$r.squared
 
 R2_cell_median <- summary(model_cell_median)$r.squared
 R2_cell_percentile5 <- summary(model_cell_percentile5)$r.squared
@@ -306,9 +292,9 @@ R2_muni_median <- summary(model_muni_median)$r.squared
 R2_muni_percentile5 <- summary(model_muni_percentile5)$r.squared
 R2_muni_percentile95 <- summary(model_muni_percentile95)$r.squared
 
-print(paste('R2 for median (CARpoly, cell, and muni):', R2_cell_median, R2_muni_median)) # R2_CARpoly_median, 
-print(paste('R2 for percentile5 (CARpoly, cell, and muni):',  R2_cell_percentile5, R2_muni_percentile5)) #R2_CARpoly_percentile5,
-print(paste('R2 for percentile95 (CARpoly, cell, and muni):',  R2_cell_percentile95, R2_muni_percentile95)) # R2_CARpoly_percentile95,
+print(paste('R2 for median (CARpoly, cell, and muni):', R2_CARpoly_median, R2_cell_median, R2_muni_median)) #  
+print(paste('R2 for percentile5 (CARpoly, cell, and muni):', R2_CARpoly_percentile5, R2_cell_percentile5, R2_muni_percentile5)) #
+print(paste('R2 for percentile95 (CARpoly, cell, and muni):', R2_CARpoly_percentile95, R2_cell_percentile95, R2_muni_percentile95)) # 
 
 # Criteria 2: variability of planting date
 for (intensity in c('SC', 'DC')) {
@@ -337,6 +323,68 @@ NOTE, DO MUNI AND CARPOLY EXTRACTIONS AND THEN MAP. MAYBE ZOOM IN ON A REGION FO
 
 ```{r}
 
+# import CARpoly data for one onset cell
+# import data -----------------------------------------------------------------------------------------------
+
+filename_CARpoly_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                            '/median_CARpoly_', onset_type, '.csv')
+filename_CARpoly_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                                 '/percentile5_CARpoly_', onset_type, '.csv')
+filename_CARpoly_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                                  '/percentile25_CARpoly_', onset_type, '.csv')
+
+filename_CARpoly_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
+layername_CARpoly_shp <- paste0('median_CARpoly_SHP_', onset_type)
+
+median_CARpoly_raw <- read.csv(filename_CARpoly_median)
+percentile5_CARpoly_raw <- read.csv(filename_CARpoly_percentile5)
+percentile25_CARpoly_raw <- read.csv(filename_CARpoly_percentile25)
+
+CARpoly_sf <- st_read(dsn = filename_CARpoly_shp, layer = layername_CARpoly_shp)
+CARpoly_sf <- CARpoly_sf[!is.na(CARpoly_sf$SC_plant) & !is.na(CARpoly_sf$DC_plant),]
+
+# clean data ------------------------------------------------------------------------------
+# 
+# # median
+# median_CARpoly <- median_CARpoly_raw %>% rename_cols_median_CARpoly()
+# percentile5_CARpoly <- percentile5_CARpoly_raw %>% filter(year > 0) 
+# percentile25_CARpoly <- percentile25_CARpoly_raw %>% filter(year > 0)
+# 
+# # create tidy datasets
+# 
+# CARpoly_tidy <- tidy_combine_muni(median_CARpoly, percentile5_CARpoly, percentile25_CARpoly)
+# 
+# CARpoly_tidy <- categorize_vars_CARpoly_tidy(CARpoly_tidy)
+# 
+# CARpoly_sf$plant_stat_type <- rep("median", nrow(CARpoly_sf))
+# 
+# # get rid of rows in muni_sf with NA in planting dates and Muni_code
+# CARpoly_sf <- CARpoly_sf[!is.na(CARpoly_sf$SC_plant) | !is.na(CARpoly_sf$DC_plant),]
+# 
+# CARpoly_sf_percentile5 <- CARpoly_sf
+# CARpoly_sf_percentile5$SC_plant <- percentile5_CARpoly$single_plant
+# CARpolysf_percentile5$DC_plant <- percentile5_CARpoly$double_plant
+# CARpoly_sf_percentile5$plant_stat_type <- rep("percentile5", nrow(CARpoly_sf_percentile5))
+# 
+# CARpoly_sf_percentile25 <- CARpoly_sf
+# CARpoly_sf_percentile25$SC_plant <- percentile25_CARpoly$single_plant
+# CARpoly_sf_percentile25$DC_plant <- percentile25_CARpoly$double_plant
+# CARpoly_sf_percentile25$plant_stat_type <- rep("percentile25", nrow(CARpoly_sf_percentile25))
+# 
+# CARpoly_sf <- rbind(CARpoly_sf, CARpoly_sf_percentile5, CARpoly_sf_percentile25)
+# 
+# CARpoly_sf_tidy <- CARpoly_sf %>% tidy_by_intensity_plant("SC_plant", "DC_plant") %>%
+#             dplyr::select(-c(SC_harvest, DC_harvest)) 
+# 
+# CARpoly_sf_tidy$year_index <- CARpoly_sf_tidy$year - 2003
+# CARpoly_sf_tidy$year_factor <- as.factor(CARpoly_sf_tidy$year)
+# 
+# CARpoly_sf_tidy <- CARpoly_sf_tidy %>%  drop_na
+
+```
+
+```{r}
+
 year_oi <- 2012 # to map
 intensity_oi <- "SC" # to map
 percentile_oi <- "median"
@@ -349,10 +397,11 @@ cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi) %>%
 muni_sf_tidy_year <- muni_sf_tidy %>% filter(year == year_oi) %>%
                                    filter(intensity == intensity_oi) %>%
                                    filter(plant_stat_type == percentile_oi)
+CARpoly_sf_tidy_year <- CARpoly_sf %>% filter(year == year_oi)
 
 ggplot(cell_sf_tidy_year) +
   geom_sf(aes(fill = plant)) + # , colour = NA) +
-  scale_fill_viridis(limits = c(50, 150)) +
+  scale_fill_viridis(limits = c(30, 150)) +
   ggtitle(paste("Cell median planting date", year_oi, intensity_oi, percentile_oi)) +
   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
   theme_bw()
@@ -366,9 +415,16 @@ ggplot(cell_sf_tidy_year) +
 
 ggplot(muni_sf_tidy_year) +
   geom_sf(aes(fill = plant)) + #, colour = NA) +
-  scale_fill_viridis() +
+  scale_fill_viridis(limits = c(30, 150)) +
   ggtitle(paste("Muni median planting date", year_oi, intensity_oi, percentile_oi)) +
   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+  theme_bw()
+
+ggplot(CARpoly_sf_tidy_year) +
+  geom_sf(aes(fill = DC_plant)) + # , colour = NA) +
+  scale_fill_viridis(limits = c(30, 150)) +
+  ggtitle(paste("CARpoly median planting date", year_oi, intensity_oi, percentile_oi)) +
+  #geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
   theme_bw()
 ```
 
@@ -381,12 +437,12 @@ Choose predictors, using all data points and only cell scale and the chosen onse
 # Choose from the following pool: onset, year, intensity, lat, lon, age of soy, region, range of historical onset from 2004 to 2014, onset:intensity, percentile, onset:percentile, onset:year, onset:lat, onset:lon and maybe other interactions
 
 # Method 1: build a semi-constrained stepwise regression based on AIC
-base_model <- lm(plant ~ onset, data = cell_sf_tidy)
-selected_model_AIC <- step(base_model, scope=list(upper = ~ 0+onset + year_index + intensity + lat + lon +  region +
-                                                plant_stat_type + onset:intensity + onset:plant_stat_type +
-                                                onset:lat + onset:lon, lower = ~ 0+onset), direction = 'forward', trace = FALSE)
-print('selected OLS model using AIC')
-summary(selected_model_AIC)
+# base_model <- lm(plant ~ onset, data = cell_sf_tidy)
+# selected_model_AIC <- step(base_model, scope=list(upper = ~ 0+onset + year_index + intensity + lat + lon +  region +
+#                                                 plant_stat_type + onset:intensity + onset:plant_stat_type +
+#                                                 onset:lat + onset:lon + prev_onset, lower = ~ 0+onset), direction = 'forward', trace = FALSE)
+# print('selected OLS model using AIC')
+# summary(selected_model_AIC)
 
 # Method 2: add stepwise according to adj R2 and partial F test
 
@@ -511,10 +567,10 @@ produce_model_stepwise <- function(data, initial.predictors, y.var, new.predicto
 }
 
 
-new.predictors <- c('year_index', 'intensity', 'lat', 'lon', 'region', 'plant_stat_type', 'onset:intensity', 'onset:plant_stat_type', 'onset:lat', 'onset:lon') 
+new.predictors <- c('year_index', 'intensity', 'lat', 'lon', 'region', 'plant_stat_type', 'onset:intensity', 'onset:plant_stat_type', 'onset:lat', 'onset:lon', 'ann_rain', 'prev_onset') 
 
 selected_model_adjR2 <- produce_model_stepwise(data = cell_sf_tidy, initial.predictors = c('onset'), y.var = 'plant',
-                       new.predictors = new.predictors, mask.soy.area = TRUE, max.predictors = 6)
+                       new.predictors = new.predictors, mask.soy.area = TRUE, max.predictors = 5)
 
 # Return the top six predictors (and their p-values)
 print('top six predictors selected by adj R2')
@@ -522,7 +578,7 @@ print(selected_model_adjR2$final_predictors)
 
 # run model with the top six predictors (onset, percentile, intensity, year, region, lat) along with the interaction variables
 # to compare the interaction variables with the different onset coefs when percentiles and intensities are fitted separately
-selected_OLS_model <- lm(plant ~ onset + plant_stat_type + intensity + year_index + region + lat + onset:plant_stat_type + onset:intensity, data = cell_sf_tidy)
+selected_OLS_model <- lm(plant ~ onset + plant_stat_type + intensity + year_index + region + onset:plant_stat_type + onset:intensity + ann_rain + prev_onset, data = cell_sf_tidy)
 
 print('OLS with selected predictors + interesting interaction variables')
 print(summary(selected_OLS_model))
@@ -1819,7 +1875,7 @@ print(paste(diff_percentile25_50_SC, diff_percentile25_50_DC))
 
 print(final_bootstrap_coefs)
 
-coef_plot <- ggplot(final_bootstrap_coefs) +
+onset_coef_plot <- ggplot(final_bootstrap_coefs) +
   geom_point(aes(x = percentile, y = onset_coef)) + 
   geom_errorbar(aes(ymin=onset_coef-onset_sderr, ymax=onset_coef+onset_sderr, x = percentile)) +
   facet_wrap(~ intensity) +
@@ -1827,7 +1883,16 @@ coef_plot <- ggplot(final_bootstrap_coefs) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90)) 
 
-print(coef_plot)
+year_coef_plot <- ggplot(final_bootstrap_coefs) +
+  geom_point(aes(x = percentile, y = year_coef)) + 
+  geom_errorbar(aes(ymin=year_coef-year_sderr, ymax=year_coef+year_sderr, x = percentile)) +
+  facet_wrap(~ intensity) +
+  ggtitle(paste('Bootstrapped year coefficients with', onset_type)) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+
+print(onset_coef_plot)
+print(year_coef_plot)
 
 # SAVED RESULTS
 saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
