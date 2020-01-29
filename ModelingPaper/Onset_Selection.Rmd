@@ -478,9 +478,7 @@ for (crop_intensity in c("SC", "DC")) {
 }
 ```
 
-
 Freq_10_persiann is best for all DC, and SC-percentile5. Freq_8_chirps is best for SC percentile25 and median, though freq_10_persiann is alright for SC percentile25.
-
 
 
 Find the best onset definition within each onset_def_type_thres, across precip data sources, intensities and percentiles
@@ -521,7 +519,7 @@ READ AN INDIVIDUAL ONSET FOR MAPPING
 ```{r}
 
 # import data for onset_oi
-onset_oi <- 'freq_10_persiann' #'freq_10_persiann'
+onset_oi <- 'freq_10_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann'
 onset_baseline <- 'AA_25_persiann' # to compare to onset_oi in difference maps, etc 'AA_25_persiann'
 
 # FOR onset_oi ------------------------------------------------------------------------------------------------------------------------
@@ -719,7 +717,13 @@ Map of within-year spatial variability (averaged quantiles through the years) fo
 
 ```{r}
 
-onset_oi_data <- onset_oi_data %>% group_by(year_factor) %>%
+# choose only one intensity and percentile for planting
+intensity <- 'DC'
+percentile <- 'percentile25'
+
+onset_oi_data_subset <- onset_oi_data[onset_oi_data$intensity == intensity & 
+                                        onset_oi_data$plant_stat_type == percentile,]
+onset_oi_data_subset <- onset_oi_data_subset %>% group_by(year_factor) %>%
   mutate(onset_quantile_eachyear = ntile(onset, 10),
          plant_quantile_eachyear = ntile(plant, 10))
 # 
@@ -736,16 +740,16 @@ onset_oi_data <- onset_oi_data %>% group_by(year_factor) %>%
 # 
 # print(quantile_maps)
 
-onset_oi_data <- onset_oi_data %>% ungroup()
+onset_oi_data_subset <- onset_oi_data_subset %>% ungroup()
 
 # calculate time-averaged quantiles
 # get cells from 2004, filter out all other cells from the other years
-cellID_2004 <- onset_oi_data[onset_oi_data$year == 2004, "cell_ID"]
+cellID_2004 <- onset_oi_data_subset[onset_oi_data_subset$year == 2004, "cell_ID"]
 st_geometry(cellID_2004) <- NULL
-onset_oi_data_subset <- onset_oi_data[onset_oi_data$cell_ID %in% cellID_2004$cell_ID,]
+onset_oi_data_subset_cells <- onset_oi_data_subset[onset_oi_data_subset$cell_ID %in% cellID_2004$cell_ID,]
 
 # group by cell_ID and calculate mean onset
-onset_oi_summarized <- onset_oi_data_subset %>% group_by(cell_ID) %>%
+onset_oi_summarized <- onset_oi_data_subset_cells %>% group_by(cell_ID) %>%
                                              summarize(onset_quantile_median = median(onset_quantile_eachyear),
                                                    onset_quantile_mean = mean(onset_quantile_eachyear),
                                                    plant_quantile_median = median(plant_quantile_eachyear)) %>%
@@ -766,7 +770,7 @@ plant_quantile_map_summary <- ggplot(onset_oi_summarized) +
       #scale_fill_viridis() +
       scale_fill_gradient(low="black", high="red") +
       #scale_fill_brewer(palette="YlOrRd") +
-      ggtitle(paste("Median plant quantile, all years")) +
+      ggtitle(paste("Median plant quantile, all years", intensity, percentile)) +
       geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", 
                    alpha = 0, linetype = 1) +
       theme_bw()
@@ -908,6 +912,96 @@ mean_onset_diff_plot <- ggplot(joined_11years) +
         theme_bw()
 
 print(mean_onset_diff_plot)
+```
+
+Calculate mean planting date across years for a given intensity and percentile
+
+```{r}
+
+intensity <- 'SC'
+percentile <- 'percentile25'
+
+onset_oi_data_subset <- onset_oi_data[onset_oi_data$intensity == intensity & onset_oi_data$plant_stat_type == percentile,]
+
+# spatial join each year's data to calculate the mean planting date
+onset_oi_data_2004 <- onset_oi_data_subset[onset_oi_data_subset$year == 2004,]
+onset_oi_data_2005 <- onset_oi_data_subset[onset_oi_data_subset$year == 2005,]
+onset_oi_data_2006 <- onset_oi_data_subset[onset_oi_data_subset$year == 2006,]
+onset_oi_data_2007 <- onset_oi_data_subset[onset_oi_data_subset$year == 2007,]
+onset_oi_data_2008 <- onset_oi_data_subset[onset_oi_data_subset$year == 2008,]
+onset_oi_data_2009 <- onset_oi_data_subset[onset_oi_data_subset$year == 2009,]
+onset_oi_data_2010 <- onset_oi_data_subset[onset_oi_data_subset$year == 2010,]
+onset_oi_data_2011 <- onset_oi_data_subset[onset_oi_data_subset$year == 2011,]
+onset_oi_data_2012 <- onset_oi_data_subset[onset_oi_data_subset$year == 2012,]
+onset_oi_data_2013 <- onset_oi_data_subset[onset_oi_data_subset$year == 2013,]
+onset_oi_data_2014 <- onset_oi_data_subset[onset_oi_data_subset$year == 2014,]
+
+joined_2years <- st_join(onset_oi_data_2004, onset_oi_data_2005, largest = TRUE, suffix = c('_2004', '_2005'))
+joined_2years <- joined_2years[,c('plant_2004', 'plant_2005')]
+
+joined_3years <- st_join(joined_2years, onset_oi_data_2006, largest = TRUE)
+joined_3years['plant_2006'] <- joined_3years['plant']
+joined_3years <- joined_3years[,c('plant_2004', 'plant_2005', 'plant_2006')]
+
+joined_4years <- st_join(joined_3years, onset_oi_data_2007, largest = TRUE)
+joined_4years['plant_2007'] <- joined_4years['plant']
+joined_4years <- joined_4years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007')]
+
+joined_5years <- st_join(joined_4years, onset_oi_data_2008, largest = TRUE)
+joined_5years['plant_2008'] <- joined_5years['plant']
+joined_5years <- joined_5years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008')]
+
+joined_6years <- st_join(joined_5years, onset_oi_data_2009, largest = TRUE)
+joined_6years['plant_2009'] <- joined_6years['plant']
+joined_6years <- joined_6years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009')]
+
+joined_7years <- st_join(joined_6years, onset_oi_data_2010, largest = TRUE)
+joined_7years['plant_2010'] <- joined_7years['plant']
+joined_7years <- joined_7years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009', 'plant_2010')]
+
+joined_8years <- st_join(joined_7years, onset_oi_data_2011, largest = TRUE)
+joined_8years['plant_2011'] <- joined_8years['plant']
+joined_8years <- joined_8years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009', 'plant_2010', 'plant_2011')]
+
+joined_9years <- st_join(joined_8years, onset_oi_data_2012, largest = TRUE)
+joined_9years['plant_2012'] <- joined_9years['plant']
+joined_9years <- joined_9years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009', 'plant_2010', 'plant_2011', 'plant_2012')]
+
+joined_10years <- st_join(joined_9years, onset_oi_data_2013, largest = TRUE)
+joined_10years['plant_2013'] <- joined_10years['plant']
+joined_10years <- joined_10years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009', 'plant_2010', 'plant_2011', 'plant_2012', 'plant_2013')]
+
+joined_11years <- st_join(joined_10years, onset_oi_data_2014, largest = TRUE)
+joined_11years['plant_2014'] <- joined_11years['plant']
+joined_11years <- joined_11years[,c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009', 'plant_2010', 'plant_2011', 'plant_2012', 'plant_2013', 'plant_2014')]
+
+```
+
+```{r}
+
+mean_of_rows_plant <- function(row) {
+  data <- row[c('plant_2004', 'plant_2005', 'plant_2006', 'plant_2007', 'plant_2008', 'plant_2009', 'plant_2010', 'plant_2011', 'plant_2012', 'plant_2013', 'plant_2014')]
+  
+  #st_geometry(data) <- NULL
+  data <- as.numeric(as.vector(data))
+  
+  return(mean(data, na.rm = TRUE))
+}
+
+mean_plant <- apply(joined_11years, 1, mean_of_rows_plant) 
+
+# add mean_onset_diff to sf for mapping
+joined_11years['mean_plant'] <- mean_plant
+
+mean_plant_plot <- ggplot(joined_11years) +
+        geom_sf(aes(fill = mean_plant), color = NA) +
+        scale_fill_viridis() +
+        ggtitle(paste('mean plant, all years', intensity, percentile)) +
+        geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black",
+                     alpha = 0, linetype = 1) +
+        theme_bw()
+
+print(mean_plant_plot)
 ```
 
 Timeseries of onset, averaged over space

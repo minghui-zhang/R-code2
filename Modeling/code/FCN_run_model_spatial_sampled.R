@@ -82,9 +82,9 @@ run_OLS <- function(full_data, predictors, y.var, plant_stat,
   lw <- nb2listw(nb, zero.policy = TRUE)
   
   # calculate spatial autocorrelation
-  moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, 500, zero.policy = TRUE)
-  moran_onset <- moran.mc(to_autocorrelation_points$onset, lw, 500, zero.policy = TRUE)
-  moran_plant <- moran.mc(to_autocorrelation_points$plant, lw, 500, zero.policy = TRUE)
+  moran_residual <- moran.mc(to_autocorrelation_points$residuals, lw, nsim =100, zero.policy = TRUE, )
+  moran_onset <- moran.mc(to_autocorrelation_points$onset, lw, nsim =100, zero.policy = TRUE)
+  moran_plant <- moran.mc(to_autocorrelation_points$plant, lw, nsim =100, zero.policy = TRUE)
   
   residual_moran <- moran_residual$statistic
   residual_moran_pval <- moran_residual$p.value

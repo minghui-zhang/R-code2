@@ -27,7 +27,7 @@ library(Metrics)
 library(randomForest)
 
 # select the onset definition
-onset_type <- 'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
+onset_type <- 'freq_10_persiann' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km' # 'Gabriel_onset'
 
 # import data for all sections
 os_system <- 'windows' # mac for laptop or windows for desktop
@@ -103,10 +103,10 @@ cell_sf$cell_ID <- median_cell$cell_ID
 cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
 
 # at this point, cell_sf has same number of rows in each year. add the previous year's onset, using NA for 2004
-cells_per_year <- nrow(cell_sf[cell_sf$year == 2004,])
-prev_year_onsets <- cell_sf[cell_sf$year <= 2013, 'onset']
-st_geometry(prev_year_onsets) <- NULL
-cell_sf$prev_onset <- c(rep(NA, cells_per_year), prev_year_onsets$onset)
+# cells_per_year <- nrow(cell_sf[cell_sf$year == 2004,])
+# prev_year_onsets <- cell_sf[cell_sf$year <= 2013, 'onset']
+# st_geometry(prev_year_onsets) <- NULL
+# cell_sf$prev_onset <- c(rep(NA, cells_per_year), prev_year_onsets$onset)
 
 
 # join median, percentile data to cell_sf
@@ -394,13 +394,13 @@ percentile_oi <- "median"
 cell_sf_tidy_year <- cell_sf_tidy %>% filter(year == year_oi) %>%
                                    filter(intensity == intensity_oi) %>%
                                    filter(plant_stat_type == percentile_oi)
-muni_sf_tidy_year <- muni_sf_tidy %>% filter(year == year_oi) %>%
-                                   filter(intensity == intensity_oi) %>%
-                                   filter(plant_stat_type == percentile_oi)
-CARpoly_sf_tidy_year <- CARpoly_sf %>% filter(year == year_oi)
+# muni_sf_tidy_year <- muni_sf_tidy %>% filter(year == year_oi) %>%
+#                                    filter(intensity == intensity_oi) %>%
+#                                    filter(plant_stat_type == percentile_oi)
+# CARpoly_sf_tidy_year <- CARpoly_sf %>% filter(year == year_oi)
 
 ggplot(cell_sf_tidy_year) +
-  geom_sf(aes(fill = plant)) + # , colour = NA) +
+  geom_sf(aes(fill = plant) , colour = NA) +
   scale_fill_viridis(limits = c(30, 150)) +
   ggtitle(paste("Cell median planting date", year_oi, intensity_oi, percentile_oi)) +
   geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
@@ -611,6 +611,7 @@ for (intensity in c('SC', 'DC')) {
     # temporal autocorrelation
     data_subset_df <- data_subset
 
+    
     # filter out all cells where there isn't data for all years
     st_geometry(data_subset_df) <- NULL
     data_subset_df <- data_subset_df[complete.cases(data_subset_df),]
@@ -621,9 +622,10 @@ for (intensity in c('SC', 'DC')) {
        cells_list[[i]] <- cells_in_year$label
        i <- i + 1
     }
+    
     full_data_cells <- Reduce(intersect, cells_list)
     data_subset_df<- data_subset_df[data_subset_df$label %in% full_data_cells, ]
-
+        
     data_subset_df_nested <- group_by(data.frame(data_subset_df), label) %>% nest()
 
     dwtest_one_cell <- function(data) {
@@ -775,9 +777,12 @@ do_elim_year = TRUE # TOGGLE TRUE IF USE YEAR AS TREND, FALSE IF USE YEAR AS FIX
 
 results <- data.frame()
 
-for (grid_size in seq(0.75, 1, 0.25)) { # 0.25 to 1.75, seq(0.75, 1.25, 0.25)
-    for (lat_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
-      for (lon_offset in seq(0, 1.25, by = 0.25)) { # 0 to 1.5
+intensity = "DC"
+percentile = "percentile25"
+
+for (grid_size in seq(0.15, 1, 0.10)) { # 0.25 to 1.75, , seq(0.15, 1, 0.10)
+    for (lat_offset in seq(0, 0.75, by = 0.18)) { # 0 to 1.5, DON'T DO BY = 0.25
+      for (lon_offset in seq(0, 0.75, by = 0.18)) { # 0 to 1.5
         
         data_subset = cell_sf_tidy[(cell_sf_tidy$intensity == intensity) & (cell_sf_tidy$plant_stat_type == percentile), ]
         
@@ -859,6 +864,7 @@ if (do_elim_year) {
   results_summary <- cbind(results_summary, elim_year_summary)
 }
 
+saveRDS(results_summary, paste0("OLS_spatial_sampling_decision_", onset_type, ".rds"))
 ```
 
 Figures for choosing sampling grid size (grid size on x axis, and various metrics on y axis; with error bars for sampling grid location)
@@ -928,7 +934,7 @@ Map of sampling grid position, sampling grid size
 
 ```{r}
 
-chosen_grid_size = 0.75
+chosen_grid_size = 0.25
 chosen_lat_offset = 0.25
 chosen_lon_offset = 0
 chosen_year_oi = 2014
@@ -975,8 +981,8 @@ test_elimyear <- function(elim_year, cell_df, cell_sf, f, model_type, grid_size,
     rmses_elimyear <- numeric(0)
     errors_elimyear <- numeric(0)
     
-    for (lat_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
-      for (lon_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+    for (lat_offset in seq(0, 0.75, by = 0.2)) { # 0 to 1.5
+      for (lon_offset in seq(0, 0.75, by = 0.2)) { # 0 to 1.5
         train_sampled <- get_sampled_data(full_data = train_sf_elimyear, plant_stat = plant_stat, grid_size = grid_size, 
                                    lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
                                    plot_samples = FALSE, year_oi = 2012) # year_oi is for plotting only
@@ -1052,8 +1058,8 @@ test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f, grid_size,
     rmses_elimcell <- numeric(0)
     errors_elimcell <- numeric(0)
     
-    for (lat_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
-      for (lon_offset in seq(0, 0.75, by = 0.25)) { # 0 to 1.5
+    for (lat_offset in seq(0, 0.75, by = 0.2)) { # 0 to 1.5
+      for (lon_offset in seq(0, 0.75, by = 0.2)) { # 0 to 1.5
         train_sampled <- get_sampled_data(full_data = train_sf_elimcell, plant_stat = plant_stat, grid_size = grid_size, 
                                    lat_offset = lat_offset, lon_offset = lon_offset, agg_scheme = FALSE, 
                                    plot_samples = FALSE, year_oi = 2012) # year_oi is for plotting only
@@ -1097,7 +1103,7 @@ test_elimcell <- function(elim_cell, cell_df, cell_sf, model_type, f, grid_size,
 
 do_elimcell <- TRUE
 do_elimyear <- TRUE
-cell_reducer <- 10 # the number of cells by this when NOT sampling data and doing elimcell
+cell_reducer <- 100 # the number of cells by this when NOT sampling data and doing elimcell
 
 set.seed(100)
 wanted_variables <- c('year', 'lat', 'lon', 'onset', 'region', 'intensity', 'plant', 'cell_ID')
@@ -1107,8 +1113,8 @@ f <- as.formula(paste('plant ~', paste(wanted_predictors, collapse = " + ")))
 f_fe <- as.formula(paste('plant ~', paste(wanted_predictors_fe, collapse = " + ") ))
 
 # NOTE, SEPARATE MODELS FOR EACH PERCENTILE AND INTENSITY
-chosen_percentile <- "percentile5"
-chosen_grid_size <- 0.75
+chosen_percentile <- "percentile25"
+chosen_grid_size <- 0.25
 chosen_intensity <- "DC"
 
 cell_sf <- cell_sf_tidy
@@ -1367,7 +1373,7 @@ Plot of prediction accuracy metrics for each model type
 
 # REPEAT FOR EACH INTENSITY AND PERCENTILE
 
-imported_prediction_error <- readRDS('prediction_error_results_freq_10_persiann_DC_percentile5.rds')
+imported_prediction_error <- readRDS('prediction_error_results_freq_8_chirps_ATchirps5km_DC_percentile25.rds')
 
 # rmse vs eliminated year, summarized for different intensities and percentiles and sampling grid locations
 
@@ -1438,7 +1444,7 @@ print(paste('elim 30%, error, fe: ', mean(elimrandom_fe$error), '+/-', sd(elimra
 # F test for FE vs pooled OLS
 
 # set up models with all data
-chosen_percentile <- "percentile5"
+chosen_percentile <- "percentile25"
 chosen_intensity <- "DC"
 
 cell_df <- cell_sf_tidy[(cell_sf_tidy$plant_stat_type == chosen_percentile) & (cell_sf_tidy$intensity == chosen_intensity), ]
@@ -1498,6 +1504,14 @@ for (intensity in c("DC", "SC")) {
     SST <- sum((data_subset$plant - mean(data_subset$plant))^2)
     SSE <- sum((data_subset$residuals - mean(data_subset$residuals))^2)
     R2 <- 1 - SSE/SST
+    
+    # correlation plot
+    print('pearson correlation:')
+    print(intensity)
+    print(percentile)
+    to_correlation <- data_subset_sf[, c('onset', 'year', 'residuals')]
+    st_geometry(to_correlation) <- NULL
+    print(cor(to_correlation, method = "pearson", use = "complete.obs"))
     
     # residuals of zero mean --------------------------------------------------------------------
     resid_mean = mean(data_subset$residuals)
@@ -1622,7 +1636,7 @@ for (intensity in c("DC", "SC")) {
     fe_sf <- merge(data_subset_sf, fe_df, by = "cell_ID")
 
     # plot fe
-    year <- 2014 # all years will be the same for fixed effects
+    year <- 2004 # all years will be the same for fixed effects
     fe_sf_year <- fe_sf[fe_sf$year == year, ]
 
     fe_map <- ggplot(fe_sf_year) +
@@ -1685,7 +1699,7 @@ for (intensity in c("SC", "DC")) {
 
 # predictive error map, eliminate one year, for OLS and FE ----------------------------------------------
 
-elim_year = 2010
+elim_year = 2014
 
 for (intensity in c("SC", "DC")) {
   for (percentile in c('percentile5', 'percentile25', 'median', 'percentile75', 'percentile95')) {
@@ -1725,14 +1739,14 @@ for (intensity in c("SC", "DC")) {
     # map
     ols_prediction_map <- ggplot(valid_sf_elimyear) +
       geom_sf(aes(fill = ols_error), color = NA) +
-      scale_fill_viridis() +
+      scale_fill_viridis() + # limits = c(-40, 40)
       ggtitle(paste("OLS prediction error", elim_year, intensity, percentile)) +
       geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
       theme_bw()
     
     fe_prediction_map <- ggplot(valid_sf_elimyear_fe) +
       geom_sf(aes(fill = fe_error), color = NA) +
-      scale_fill_viridis() +
+      scale_fill_viridis() + # limits = c(-40, 40)
       ggtitle(paste("FE prediction error", elim_year, intensity, percentile)) +
       geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
       theme_bw()
@@ -1857,6 +1871,8 @@ names(year_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median',
 diff_intensities_median <- t.test(onset_coefs_list[['SC_median']], onset_coefs_list[['DC_median']])$p.value
 diff_intensities_percentile25 <- t.test(onset_coefs_list[['SC_percentile25']], onset_coefs_list[['DC_percentile25']])$p.value
 diff_intensities_percentile5 <- t.test(onset_coefs_list[['SC_percentile5']], onset_coefs_list[['DC_percentile5']])$p.value
+diff_intensities_percentile75 <- t.test(onset_coefs_list[['SC_percentile75']], onset_coefs_list[['DC_percentile75']])$p.value
+diff_intensities_percentile95 <- t.test(onset_coefs_list[['SC_percentile95']], onset_coefs_list[['DC_percentile95']])$p.value
 
 diff_percentile5_25_SC <- t.test(onset_coefs_list[['SC_percentile5']], onset_coefs_list[['SC_percentile25']])$p.value
 diff_percentile5_25_DC <- t.test(onset_coefs_list[['DC_percentile5']], onset_coefs_list[['DC_percentile25']])$p.value
@@ -1864,14 +1880,27 @@ diff_percentile5_25_DC <- t.test(onset_coefs_list[['DC_percentile5']], onset_coe
 diff_percentile25_50_SC <- t.test(onset_coefs_list[['SC_percentile25']], onset_coefs_list[['SC_median']])$p.value
 diff_percentile25_50_DC <- t.test(onset_coefs_list[['DC_percentile25']], onset_coefs_list[['DC_median']])$p.value
 
-print('p values comparing intensities:')
-print(paste(diff_intensities_median, diff_intensities_percentile25, diff_intensities_percentile5))
+diff_percentile50_75_SC <- t.test(onset_coefs_list[['SC_median']], onset_coefs_list[['SC_percentile75']])$p.value
+diff_percentile50_75_DC <- t.test(onset_coefs_list[['DC_median']], onset_coefs_list[['DC_percentile75']])$p.value
 
-print('p values comparing percentile5 and percentile25:')
+diff_percentile75_95_SC <- t.test(onset_coefs_list[['SC_percentile75']], onset_coefs_list[['SC_percentile95']])$p.value
+diff_percentile75_95_DC <- t.test(onset_coefs_list[['DC_percentile75']], onset_coefs_list[['DC_percentile95']])$p.value
+
+print('p values comparing intensities: (for percentile95, to percentile5)')
+print(paste(diff_intensities_percentile95, diff_intensities_percentile95, diff_intensities_median, diff_intensities_percentile25, diff_intensities_percentile5))
+
+print('p values comparing percentile5 and percentile25 (for SC, then DC):')
 print(paste(diff_percentile5_25_SC, diff_percentile5_25_DC))
 
-print('p values comparing percentile25 and median:')
+print('p values comparing percentile25 and median (for SC, then DC):')
 print(paste(diff_percentile25_50_SC, diff_percentile25_50_DC))
+
+print('p values comparing percentile50 and percentile75 (for SC, then DC):')
+print(paste(diff_percentile50_75_SC, diff_percentile50_75_DC))
+
+print('p values comparing percentile75 and percentile95 (for SC, then DC):')
+print(paste(diff_percentile75_95_SC, diff_percentile75_95_DC))
+
 
 print(final_bootstrap_coefs)
 
