@@ -470,8 +470,19 @@ for (crop_intensity in c("SC", "DC")) {
         geom_hline(yintercept = 0.05, color = 'red') +
         ylab('p-val of morans I for residual')
       
+      results_persiann <- results[results$precip_data == 'persiann',]
+      
+      best_onset_plot_persiann <- ggplot(mapping = aes(x = onset_def_type_thres, y = onset_coef, col = onset_scale), results_persiann) +
+        geom_point() +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0.1, 0.5)) +
+        ylab('onset coefficient')
+      
       #print(best_onset_plot)
       print(best_onset_plot_scaleCompare)
+      print(best_onset_plot_persiann)
       #print(R2_plot)
       #print(moran_i_pval_residual_plot_scaleCompare)
     }
@@ -918,7 +929,7 @@ Calculate mean planting date across years for a given intensity and percentile
 
 ```{r}
 
-intensity <- 'SC'
+intensity <- 'DC'
 percentile <- 'percentile25'
 
 onset_oi_data_subset <- onset_oi_data[onset_oi_data$intensity == intensity & onset_oi_data$plant_stat_type == percentile,]

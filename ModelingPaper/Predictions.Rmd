@@ -131,12 +131,20 @@ Given a year and region, plot planting date CDF and make predictions from it
 
 ```{r}
 
-year_oi <- 2014
+year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 
 # onset regions and change
 region_cutoff <- -54 # longitude; to the west, 'not_vulnerable' and to the east, 'vulnerable'
-onset_change_vulnerable <- 10
-onset_change_not_vulnerable <- 1
+onset_percentile <- 10
+onset_change_vulnerable <- -10
+onset_change_not_vulnerable <- -5
+
+wet_length_vulnerable <- 218
+wet_length_not_vulnerable <- 233
+offset_change_vulnerable <- -42
+offset_change_not_vulnerable <- -1
+SC_cycle_length <- 90
+DC_cycle_length <- 200
 year_change <- 10 # number of years after year_oi for prediction
 
 cell_df <- cell_sf_tidy
@@ -165,17 +173,34 @@ for (intensity in c('SC', 'DC')) {
                               type = character(0))
     
     if (region == 'vulnerable') {
-      cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon > region_cutoff,] # east
+      cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon > region_cutoff,] # east # cell_df$year == year_oi & 
       onset_change <- onset_change_vulnerable
+      wet_length <- wet_length_vulnerable
+      offset_change <- offset_change_vulnerable
     }
     
     if (region == 'not_vulnerable') {
-      cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon <= region_cutoff,] # west
+      cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon <= region_cutoff,] # west # cell_df$year == year_oi & 
       onset_change <- onset_change_not_vulnerable
+      wet_length <- wet_length_not_vulnerable
+      offset_change <- offset_change_not_vulnerable
     }
     
     obs_onset <- mean(cell_df_subset$onset)
     pred_onset <- obs_onset + onset_change
+    obs_offset <- obs_onset + wet_length
+    pred_offset <- pred_onset + wet_length + offset_change
+    
+    # calculate latest planting date based on cropping intensity
+    if (intensity == 'SC') {
+      pred_latest_plant <- pred_offset - SC_cycle_length
+      obs_latest_plant <- obs_offset - SC_cycle_length
+    }
+    
+    if (intensity == 'DC') {
+      pred_latest_plant <- pred_offset - DC_cycle_length
+      obs_latest_plant <- obs_offset - DC_cycle_length
+    }
   
     for (percentile in c('percentile5', 'percentile25', 'percentile50', 'percentile75', 'percentile95')) {
       
@@ -256,7 +281,22 @@ for (intensity in c('SC', 'DC')) {
       xlim(50, 130) +
       theme_bw()
     
-    print(predictions_plot)
+    predictions_simplified <- predictions[predictions$type %in% c('observed', 'pred_onset_year_change', 'pred_onset_change'),]
+    
+    predictions_plot_simplified <- ggplot(predictions_simplified) +
+      geom_line(mapping = aes(x = plant, y = percentile, col = type)) +
+      geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
+      geom_vline(mapping = aes(xintercept = obs_onset), col = 'blue') +
+      geom_vline(mapping = aes(xintercept = pred_onset), col = 'blue', linetype = 'dashed') +
+      #geom_vline(mapping = aes(xintercept = obs_latest_plant), col = 'red') +
+      #geom_vline(mapping = aes(xintercept = pred_latest_plant), col = 'red', linetype = 'dashed') +
+      ggtitle(paste('Planting CDF',intensity, region, 'region', 'onset percentile', onset_percentile)) +
+      xlim(30, 130) +
+      theme_bw()
+      
+      
+    #print(predictions_plot)
+    print(predictions_plot_simplified)
   }
 }
 
