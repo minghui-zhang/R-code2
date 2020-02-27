@@ -41,7 +41,7 @@ crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs8
 ```
 
 ```{r}
-onset_oi <- 'freq_10_persiann' #'freq_10_persiann'
+onset_oi <- 'freq_8_chirps_ATchirps5km' #'freq_10_persiann'
 
 # FOR onset_oi ------------------------------------------------------------------------------------------------------------------------
 # read and clean the data ---------------------------------------------------------------------------------------------------------
@@ -134,10 +134,15 @@ Given a year and region, plot planting date CDF and make predictions from it
 year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 
 # onset regions and change
+
+# 10th percentile: vulnerable = -10; no vulnerable = -5
+# 50th percentile: vulnerable = 5; not vulnerable = 3
+# 90th percentile: vulnerable = 20; not vulnerable = 13
+onset_percentile <- 90 # CHANGE THIS
+onset_change_vulnerable <- 20 # CHANGE THIS
+onset_change_not_vulnerable <- 13 # CHANGE THIS
+
 region_cutoff <- -54 # longitude; to the west, 'not_vulnerable' and to the east, 'vulnerable'
-onset_percentile <- 10
-onset_change_vulnerable <- -10
-onset_change_not_vulnerable <- -5
 
 wet_length_vulnerable <- 218
 wet_length_not_vulnerable <- 233
@@ -150,9 +155,17 @@ year_change <- 10 # number of years after year_oi for prediction
 cell_df <- cell_sf_tidy
 st_geometry(cell_df) <- NULL
 
-coefs_freq_10_persiann <- readRDS("FE_bootstrapped_coefs_freq_10_persiann.rds")
-coefs_freq_10_persiann$percentile <- as.character(coefs_freq_10_persiann$percentile)
-coefs_freq_10_persiann[which(coefs_freq_10_persiann[,"percentile"] == "median"), "percentile"] <- "percentile50"
+if (onset_oi == 'freq_10_persiann') {
+  coefs_onset_oi <- readRDS("FE_bootstrapped_coefs_freq_10_persiann.rds")
+}
+
+if (onset_oi == 'freq_8_chirps_ATchirps5km') {
+  coefs_onset_oi <- readRDS("FE_bootstrapped_coefs_freq_8_chirps_ATchirps5km.rds")
+}
+
+coefs_onset_oi$percentile <- as.character(coefs_onset_oi$percentile)
+coefs_onset_oi[which(coefs_onset_oi[,"percentile"] == "median"), "percentile"] <- "percentile50"
+
 
 # to store mean 'change in planting date' per 25km cell. 
 predictions_summary <- data.frame(intensity = character(0),
@@ -210,14 +223,14 @@ for (intensity in c('SC', 'DC')) {
       mean_observed <- mean(cell_df_subset[cell_df_subset$percentile == percentile, 'plant'])
       
       # predictions
-      plant_pred_onset_change <- mean_observed + onset_change*coefs_freq_10_persiann[coefs_freq_10_persiann$intensity == intensity &
-                                                                                       coefs_freq_10_persiann$percentile == percentile, "onset_coef"]
-      plant_pred_year_change <- mean_observed + year_change*coefs_freq_10_persiann[coefs_freq_10_persiann$intensity == intensity &
-                                                                                       coefs_freq_10_persiann$percentile == percentile, "year_coef"]
-      plant_pred_onset_year_change <- mean_observed + onset_change*coefs_freq_10_persiann[coefs_freq_10_persiann$intensity == intensity &
-                                                                                       coefs_freq_10_persiann$percentile == percentile, "onset_coef"] +
-                                                      year_change*coefs_freq_10_persiann[coefs_freq_10_persiann$intensity == intensity &
-                                                                                       coefs_freq_10_persiann$percentile == percentile, "year_coef"]
+      plant_pred_onset_change <- mean_observed + onset_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "onset_coef"]
+      plant_pred_year_change <- mean_observed + year_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "year_coef"]
+      plant_pred_onset_year_change <- mean_observed + onset_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "onset_coef"] +
+                                                      year_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "year_coef"]
       
       # to store originals and predictions
       predictions <- rbind(predictions, 
