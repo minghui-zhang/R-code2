@@ -427,6 +427,7 @@ for (crop_intensity in c("SC", "DC")) {
       
       best_onset_plot <- ggplot(results) +
         geom_point(aes(x = onset_type, y = onset_coef)) +
+        geom_errorbar(aes(ymin=onset_coef-onset_coef_stderr, ymax=onset_coef+onset_coef_stderr, x = onset_type)) +
         theme_bw() +
         theme(axis.text.x = element_text(angle = 90)) +
         ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
@@ -435,6 +436,7 @@ for (crop_intensity in c("SC", "DC")) {
       
       best_onset_plot_scaleCompare <- ggplot(mapping = aes(x = onset_def_type_thres, y = onset_coef, col = onset_scale), results) +
         geom_point() +
+        geom_errorbar(aes(ymin=onset_coef-onset_coef_stderr, ymax=onset_coef+onset_coef_stderr)) +
         geom_point(mapping = aes(x=best_onset_def_type_thres[1], y=best_onset_coefs[1]), colour="black", shape = 1, size = 7) +
         geom_point(mapping = aes(x=best_onset_def_type_thres[2], y=best_onset_coefs[2]), colour="black", shape = 1, size = 7) +
         geom_point(mapping = aes(x=best_onset_def_type_thres[3], y=best_onset_coefs[3]), colour="black", shape = 1, size = 7) +
@@ -482,7 +484,7 @@ for (crop_intensity in c("SC", "DC")) {
       
       #print(best_onset_plot)
       print(best_onset_plot_scaleCompare)
-      print(best_onset_plot_persiann)
+      #print(best_onset_plot_persiann)
       #print(R2_plot)
       #print(moran_i_pval_residual_plot_scaleCompare)
     }
