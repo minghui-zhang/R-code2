@@ -41,20 +41,20 @@ crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs8
 ```
 
 ```{r}
-onset_oi <- 'AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann'
+onset_oi <- 'demise_AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann'
 
 # FOR onset_oi ------------------------------------------------------------------------------------------------------------------------
 # read and clean the data ---------------------------------------------------------------------------------------------------------
-filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi, '/median_onset_cell_', onset_oi , '.csv')
-filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/percentile5_onset_cell_', onset_oi , '.csv')
-filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/percentile25_onset_cell_', onset_oi , '.csv')
+filename_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi, '/median_onset_cell_onset_', onset_oi , '.csv')
+filename_percentile5 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/percentile5_onset_cell_onset_', onset_oi , '.csv')
+filename_percentile25 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/percentile25_onset_cell_onset_', onset_oi , '.csv')
 filename_percentile75 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi, 
-                                  '/percentile75_onset_cell_', onset_oi, '.csv')
+                                  '/percentile75_onset_cell_onset_', onset_oi, '.csv')
 filename_percentile95 <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi, 
-                                  '/percentile95_onset_cell_', onset_oi, '.csv')
+                                  '/percentile95_onset_cell_onset_', onset_oi, '.csv')
 
 filename_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_oi , '/shp')
-layername_shp <- paste0('median_onset_cell_SHP_', onset_oi )
+layername_shp <- paste0('median_onset_cell_SHP_onset_', onset_oi )
     
 median_cell_raw <- read.csv(filename_median)
 percentile5_cell_raw <- read.csv(filename_percentile5)
@@ -69,11 +69,12 @@ cell_sf <- st_read(dsn = filename_shp, layer = layername_shp)
 median_cell <- median_cell_raw %>% delete_cols_median_cell() %>%
                                       rename_cols_median_cell()
 median_cell$plant_stat_type <- rep('median', nrow(median_cell))
+median_cell <- median_cell %>% rename(demise = demise_median) %>% dplyr::select(-demise_sum)
   
 # percentiles
-percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell()
-percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell()
-percentile75_cell <- percentile75_cell_raw %>% rename_cols_percentile_cell()
+percentile5_cell <- percentile5_cell_raw %>% rename_cols_percentile_cell() 
+percentile25_cell <- percentile25_cell_raw %>% rename_cols_percentile_cell() 
+percentile75_cell <- percentile75_cell_raw %>% rename_cols_percentile_cell() 
 percentile95_cell <- percentile95_cell_raw %>% rename_cols_percentile_cell()
   
 # SF DATA ------------------------------------------------------------------------------------------------
@@ -86,6 +87,7 @@ cell_sf$cell_ID <- sapply(as.character(cell_sf$cell_ID), clean_cell_ID)
 # cell_sf has median information, but copy it and put in percentile info for DC and SC plant
   
 cell_sf$plant_stat_type <- rep("median", nrow(cell_sf))
+cell_sf$demise <- median_cell$demise
   
 cell_sf_percentile5 <- cell_sf
 cell_sf_percentile5$SC_plant <- percentile5_cell$SC_plant
@@ -141,13 +143,11 @@ year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 onset_percentile <- 90 # CHANGE THIS
 onset_change_vulnerable <- 20 # CHANGE THIS
 onset_change_not_vulnerable <- 13 # CHANGE THIS
+demise_change_vulnerable <- -42 # CHANGE THIS
+demise_change_not_vulnerable <- -1 # CHANGE THIS
 
 region_cutoff <- -54 # longitude; to the west, 'not_vulnerable' and to the east, 'vulnerable'
 
-wet_length_vulnerable <- 218
-wet_length_not_vulnerable <- 233
-offset_change_vulnerable <- -42
-offset_change_not_vulnerable <- -1
 SC_cycle_length <- 90
 DC_cycle_length <- 200
 year_change <- 10 # number of years after year_oi for prediction
@@ -155,7 +155,7 @@ year_change <- 10 # number of years after year_oi for prediction
 cell_df <- cell_sf_tidy
 st_geometry(cell_df) <- NULL
 
-if (onset_oi == 'AA_25_persiann') {
+if (onset_oi == 'demise_AA_25_persiann') {
   coefs_onset_oi <- readRDS("FE_bootstrapped_coefs_AA_25_persiann.rds")
 }
 
@@ -170,7 +170,6 @@ if (onset_oi == 'freq_8_chirps_ATchirps5km') {
 coefs_onset_oi$percentile <- as.character(coefs_onset_oi$percentile)
 coefs_onset_oi[which(coefs_onset_oi[,"percentile"] == "median"), "percentile"] <- "percentile50"
 
-
 # to store mean 'change in planting date' per 25km cell. 
 predictions_summary <- data.frame(intensity = character(0),
                                   region = character(0),
@@ -179,7 +178,9 @@ predictions_summary <- data.frame(intensity = character(0),
                                   # NOTE: THESE PREDICTIONS for change_plant ARE ASSUMING THERE'S NO IMPACT OF ONSET TIMING ON PLANTING DATE
                                   change_plant = numeric(0), 
                                   # the percent of the 25km cell that is affected by late onset (i.e. can't plant as early as they otherwise would)
-                                  percent_affected_late_onset = numeric(0))
+                                  percent_affected_late_onset = numeric(0),
+                                  # percent of people who won't be able to do DC (or SC) due to earlier demise
+                                  percent_affected_early_demise = numeric(0))
 
 for (intensity in c('SC', 'DC')) {
   for (region in c('vulnerable', 'not_vulnerable')) {
@@ -192,31 +193,29 @@ for (intensity in c('SC', 'DC')) {
     if (region == 'vulnerable') {
       cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon > region_cutoff,] # east # cell_df$year == year_oi & 
       onset_change <- onset_change_vulnerable
-      wet_length <- wet_length_vulnerable
-      offset_change <- offset_change_vulnerable
+      demise_change <- demise_change_vulnerable
     }
     
     if (region == 'not_vulnerable') {
       cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon <= region_cutoff,] # west # cell_df$year == year_oi & 
       onset_change <- onset_change_not_vulnerable
-      wet_length <- wet_length_not_vulnerable
-      offset_change <- offset_change_not_vulnerable
+      demise_change <- demise_change_not_vulnerable
     }
     
     obs_onset <- mean(cell_df_subset$onset)
     pred_onset <- obs_onset + onset_change
-    obs_offset <- obs_onset + wet_length
-    pred_offset <- pred_onset + wet_length + offset_change
+    obs_demise <- mean(cell_df_subset$demise)
+    pred_demise <- obs_demise + demise_change
     
     # calculate latest planting date based on cropping intensity
     if (intensity == 'SC') {
-      pred_latest_plant <- pred_offset - SC_cycle_length
-      obs_latest_plant <- obs_offset - SC_cycle_length
+      pred_latest_plant <- pred_demise + 30 - SC_cycle_length # assume use 20 days of soil moisture and 10 days for grain drying
+      obs_latest_plant <- obs_demise + 30 - SC_cycle_length
     }
     
     if (intensity == 'DC') {
-      pred_latest_plant <- pred_offset - DC_cycle_length
-      obs_latest_plant <- obs_offset - DC_cycle_length
+      pred_latest_plant <- pred_demise + 30 - DC_cycle_length
+      obs_latest_plant <- obs_demise + 30 - DC_cycle_length
     }
   
     for (percentile in c('percentile5', 'percentile25', 'percentile50', 'percentile75', 'percentile95')) {
@@ -229,8 +228,6 @@ for (intensity in c('SC', 'DC')) {
       # predictions
       plant_pred_onset_change <- mean_observed + onset_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
                                                                                        coefs_onset_oi$percentile == percentile, "onset_coef"]
-      plant_pred_year_change <- mean_observed + year_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
-                                                                                       coefs_onset_oi$percentile == percentile, "year_coef"]
       plant_pred_onset_year_change <- mean_observed + onset_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
                                                                                        coefs_onset_oi$percentile == percentile, "onset_coef"] +
                                                       year_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
@@ -239,9 +236,9 @@ for (intensity in c('SC', 'DC')) {
       # to store originals and predictions
       predictions <- rbind(predictions, 
                            data.frame(
-                             percentile = rep(percentile_int, 4),
-                             plant = c(mean_observed, plant_pred_onset_change, plant_pred_year_change, plant_pred_onset_year_change),
-                             type = c('observed', 'pred_onset_change', 'pred_year_change', 'pred_onset_year_change')
+                             percentile = rep(percentile_int, 3),
+                             plant = c(mean_observed, plant_pred_onset_change, plant_pred_onset_year_change),
+                             type = c('observed', 'pred_onset_change', 'pred_onset_year_change')
                              )
                            )
     }
@@ -255,10 +252,9 @@ for (intensity in c('SC', 'DC')) {
     percentile95_obs <- observations[observations$percentile == 95, 'plant']
       
     # calculate change in plant
-    for (pred_type in c('pred_onset_change', 'pred_year_change', 'pred_onset_year_change')) {
+    for (pred_type in c('pred_onset_change', 'pred_onset_year_change')) {
       predictions_pred_type <- predictions[predictions$type == pred_type,]
-      
-      
+
       # get predictions
       percentile5_pred <- predictions_pred_type[predictions_pred_type$percentile == 5, 'plant']
       percentile25_pred <- predictions_pred_type[predictions_pred_type$percentile == 25, 'plant']
@@ -272,6 +268,7 @@ for (intensity in c('SC', 'DC')) {
             0.25*((percentile50_obs - percentile50_pred) + (percentile25_obs - percentile25_pred))/2 +
             0.2*((percentile25_obs - percentile25_pred) + (percentile5_obs - percentile5_pred))/2
       
+      # percent people who need to plant later due to delayed onset
       if (pred_onset <= percentile5_pred) {
         percent_affect_late_onset <- 0
       }
@@ -280,40 +277,57 @@ for (intensity in c('SC', 'DC')) {
                                             c(5, 25, 50, 75, 95), xout = pred_onset)$y
       }
       
+      # percent people who can't double crop due to accelerated demise (compared to 2014 observed planting and demise)
+      if (pred_latest_plant >= percentile95_pred) {
+        percent_affected_early_demise <- 0
+      }
+      else if (pred_latest_plant <= percentile5_pred) {
+        percent_affected_early_demise <- 100
+      }
+      else {
+        # # percent of currently cropped DC who technically shouldn't be able to do DC
+        # obs_percent_affected <- approx(c(percentile5_obs, percentile25_obs, percentile50_obs, percentile75_obs, percentile95_obs), 
+        #                                     c(5, 25, 50, 75, 95), xout = obs_latest_plant)$y
+        # 
+        # # percent of currently cropped DC who won't be able to do DC in the future
+        # pred_percent_affected <- approx(c(percentile5_pred, percentile25_pred, percentile50_pred, percentile75_pred, percentile95_pred), 
+        #                                     c(5, 25, 50, 75, 95), xout = pred_latest_plant)$y
+        # 
+        # # change in percent of people who won't be able to do DC
+        # percent_affected_early_demise <- pred_percent_affected - obs_percent_affected
+        
+        percent_affected_early_demise <- approx(c(percentile5_pred, percentile25_pred, percentile50_pred, percentile75_pred, percentile95_pred), 
+                                            c(5, 25, 50, 75, 95), xout = pred_latest_plant)$y
+        
+        print('in else statement')
+      }
+      
       predictions_summary <- rbind(predictions_summary, 
                                    data.frame(intensity = intensity,
                                               region = region,
                                               pred_type = pred_type,
                                               change_plant = area,
-                                              percent_affect_late_onset = percent_affect_late_onset))
+                                              percent_affect_late_onset = percent_affect_late_onset, 
+                                              percent_affected_early_demise = percent_affected_early_demise))
       
     }
+
+    # set max x limit based on cropping intensity
+    if (intensity == 'SC') {max_xlim <- 230}
+    if (intensity == 'DC') {max_xlim <- 130}
     
     predictions_plot <- ggplot(predictions) +
       geom_line(mapping = aes(x = plant, y = percentile, col = type)) +
       geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
       geom_vline(mapping = aes(xintercept = obs_onset), col = 'blue') +
       geom_vline(mapping = aes(xintercept = pred_onset), col = 'blue', linetype = 'dashed') +
-      ggtitle(paste('Planting CDF',intensity, region, 'region')) +
-      xlim(50, 130) +
-      theme_bw()
-    
-    predictions_simplified <- predictions[predictions$type %in% c('observed', 'pred_onset_year_change', 'pred_onset_change'),]
-    
-    predictions_plot_simplified <- ggplot(predictions_simplified) +
-      geom_line(mapping = aes(x = plant, y = percentile, col = type)) +
-      geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
-      geom_vline(mapping = aes(xintercept = obs_onset), col = 'blue') +
-      geom_vline(mapping = aes(xintercept = pred_onset), col = 'blue', linetype = 'dashed') +
-      #geom_vline(mapping = aes(xintercept = obs_latest_plant), col = 'red') +
-      #geom_vline(mapping = aes(xintercept = pred_latest_plant), col = 'red', linetype = 'dashed') +
+      geom_vline(mapping = aes(xintercept = obs_latest_plant), col = 'red') +
+      geom_vline(mapping = aes(xintercept = pred_latest_plant), col = 'red', linetype = 'dashed') +
       ggtitle(paste('Planting CDF',intensity, region, 'region', 'onset percentile', onset_percentile)) +
-      xlim(30, 130) +
+      xlim(30, max_xlim) +
       theme_bw()
       
-      
-    #print(predictions_plot)
-    print(predictions_plot_simplified)
+    print(predictions_plot)
   }
 }
 
