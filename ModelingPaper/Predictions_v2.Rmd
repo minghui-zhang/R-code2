@@ -4,6 +4,7 @@ output: html_document
 ---
 
 Import and clean data
+
 ```{r}
 
 # import data
@@ -140,11 +141,11 @@ year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 # 10th percentile: vulnerable = -10; no vulnerable = -5
 # 50th percentile: vulnerable = 5; not vulnerable = 3
 # 90th percentile: vulnerable = 20; not vulnerable = 13
-onset_percentile <- 90 # CHANGE THIS
-onset_change_vulnerable <- 20 # CHANGE THIS
-onset_change_not_vulnerable <- 13 # CHANGE THIS
-demise_change_vulnerable <- -42 # CHANGE THIS
-demise_change_not_vulnerable <- -1 # CHANGE THIS
+case_name <- 'lateOn_earlyDem' # CHANGE THIS
+onset_change_vulnerable <- 6.99 # CHANGE THIS
+onset_change_not_vulnerable <- 3.91 # CHANGE THIS
+demise_change_vulnerable <- 4.06 # CHANGE THIS
+demise_change_not_vulnerable <- 9.93 # CHANGE THIS
 
 region_cutoff <- -54 # longitude; to the west, 'not_vulnerable' and to the east, 'vulnerable'
 
@@ -180,7 +181,9 @@ predictions_summary <- data.frame(intensity = character(0),
                                   # the percent of the 25km cell that is affected by late onset (i.e. can't plant as early as they otherwise would)
                                   percent_affected_late_onset = numeric(0),
                                   # percent of people who won't be able to do DC (or SC) due to earlier demise
-                                  percent_affected_early_demise = numeric(0))
+                                  percent_affected_early_demise = numeric(0),
+                                  # available days to plant the given intensity
+                                  window = numeric(0))
 
 for (intensity in c('SC', 'DC')) {
   for (region in c('vulnerable', 'not_vulnerable')) {
@@ -206,6 +209,8 @@ for (intensity in c('SC', 'DC')) {
     pred_onset <- obs_onset + onset_change
     obs_demise <- mean(cell_df_subset$demise)
     pred_demise <- obs_demise + demise_change
+    
+
     
     # calculate latest planting date based on cropping intensity
     if (intensity == 'SC') {
@@ -251,6 +256,9 @@ for (intensity in c('SC', 'DC')) {
     percentile75_obs <- observations[observations$percentile == 75, 'plant']
     percentile95_obs <- observations[observations$percentile == 95, 'plant']
       
+    # calculate number of days available for planting
+    window <- max(0, pred_latest_plant - pred_onset) # if latest plant is before onset, window = 0
+    
     # calculate change in plant
     for (pred_type in c('pred_onset_change', 'pred_onset_year_change')) {
       predictions_pred_type <- predictions[predictions$type == pred_type,]
@@ -263,10 +271,10 @@ for (intensity in c('SC', 'DC')) {
       percentile95_pred <- predictions_pred_type[predictions_pred_type$percentile == 95, 'plant']
       
       # calculate area (in planting date)
-      area <- 0.2*((percentile95_obs - percentile95_pred) + (percentile75_obs - percentile75_pred))/2 +
-            0.25*((percentile75_obs - percentile75_pred) + (percentile50_obs - percentile50_pred))/2 +
-            0.25*((percentile50_obs - percentile50_pred) + (percentile25_obs - percentile25_pred))/2 +
-            0.2*((percentile25_obs - percentile25_pred) + (percentile5_obs - percentile5_pred))/2
+      area <- 0.2*((percentile95_pred - percentile95_obs) + (percentile75_pred - percentile75_obs))/2 +
+            0.25*((percentile75_pred - percentile75_obs) + (percentile50_pred - percentile50_obs))/2 +
+            0.25*((percentile50_pred - percentile50_obs) + (percentile25_pred - percentile25_obs))/2 +
+            0.2*((percentile25_pred - percentile25_obs) + (percentile5_pred - percentile5_obs))/2
       
       # percent people who need to plant later due to delayed onset
       if (pred_onset <= percentile5_pred) {
@@ -296,10 +304,8 @@ for (intensity in c('SC', 'DC')) {
         # # change in percent of people who won't be able to do DC
         # percent_affected_early_demise <- pred_percent_affected - obs_percent_affected
         
-        percent_affected_early_demise <- approx(c(percentile5_pred, percentile25_pred, percentile50_pred, percentile75_pred, percentile95_pred), 
+        percent_affected_early_demise <- 100 - approx(c(percentile5_pred, percentile25_pred, percentile50_pred, percentile75_pred, percentile95_pred), 
                                             c(5, 25, 50, 75, 95), xout = pred_latest_plant)$y
-        
-        print('in else statement')
       }
       
       predictions_summary <- rbind(predictions_summary, 
@@ -308,7 +314,8 @@ for (intensity in c('SC', 'DC')) {
                                               pred_type = pred_type,
                                               change_plant = area,
                                               percent_affect_late_onset = percent_affect_late_onset, 
-                                              percent_affected_early_demise = percent_affected_early_demise))
+                                              percent_affected_early_demise = percent_affected_early_demise,
+                                              window = window))
       
     }
 
@@ -323,7 +330,7 @@ for (intensity in c('SC', 'DC')) {
       geom_vline(mapping = aes(xintercept = pred_onset), col = 'blue', linetype = 'dashed') +
       geom_vline(mapping = aes(xintercept = obs_latest_plant), col = 'red') +
       geom_vline(mapping = aes(xintercept = pred_latest_plant), col = 'red', linetype = 'dashed') +
-      ggtitle(paste('Planting CDF',intensity, region, 'region', 'onset percentile', onset_percentile)) +
+      ggtitle(paste('Planting CDF',intensity, region, 'region', 'case', case_name)) +
       xlim(30, max_xlim) +
       theme_bw()
       
