@@ -142,10 +142,10 @@ year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 # 50th percentile: vulnerable = 5; not vulnerable = 3
 # 90th percentile: vulnerable = 20; not vulnerable = 13
 case_name <- 'lateOn_earlyDem' # CHANGE THIS
-onset_change_vulnerable <- 6.99 # CHANGE THIS
-onset_change_not_vulnerable <- 3.91 # CHANGE THIS
-demise_change_vulnerable <- 4.06 # CHANGE THIS
-demise_change_not_vulnerable <- 9.93 # CHANGE THIS
+onset_change_vulnerable <- 20.92 # CHANGE THIS
+onset_change_not_vulnerable <- 13.64 # CHANGE THIS
+demise_change_vulnerable <- -26.42 # CHANGE THIS
+demise_change_not_vulnerable <- -22.83 # CHANGE THIS
 
 region_cutoff <- -54 # longitude; to the west, 'not_vulnerable' and to the east, 'vulnerable'
 
@@ -339,5 +339,355 @@ for (intensity in c('SC', 'DC')) {
 }
 
 print(predictions_summary)
+
+```
+
+## heatmap of predicted metrics
+
+```{r}
+
+# sample_predicted <- data.frame(case = c('worst', 'worst', 'medium', 'medium', 'best', 'best',
+#                                             'worst', 'worst', 'medium', 'medium', 'best', 'best',
+#                                             'worst', 'worst', 'medium', 'medium', 'best', 'best',
+#                                             'worst', 'worst', 'medium', 'medium', 'best', 'best'),
+#                           intensity = c('SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+#                                         'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+#                                         'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+#                                         'SC', 'DC', 'SC', 'DC', 'SC', 'DC'), 
+#                           region = c('east', 'east', 'east', 'east', 
+#                                      'east', 'east', 'east', 'east',
+#                                      'east', 'east', 'east', 'east',
+#                                      'west', 'west', 'west', 'west',
+#                                      'west', 'west', 'west', 'west',
+#                                      'west', 'west', 'west', 'west'),
+#                           trend = c('yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+#                                     'no', 'no', 'no', 'no', 'no', 'no',
+#                                     'yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+#                                     'no', 'no', 'no', 'no', 'no', 'no'),
+#                           value = c(1,2,3,4,5,6,
+#                                     7,8,9,10,11,12,
+#                                     13, 14, 15, 16, 17, 18,
+#                                     19, 20, 21, 22, 23, 24
+#                                     ))
+# sample_predicted$yID<- with(sample_predicted, paste0(case, intensity))
+# sample_predicted$xID<- with(sample_predicted, paste0(region, trend))
+# 
+# print(sample_predicted)
+# 
+# ggplot(data = sample_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+#   geom_tile() +
+#   geom_text(aes(fill = sample_predicted$value, label = round(sample_predicted$value, 2))) + # write the values
+#   xlab(label = "Sample") +
+#   ggtitle("Metric name")
+
+plant_delay_days_predicted <- data.frame(case = c('worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best'),
+                          intensity = c('SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC'), 
+                          region = c('east', 'east', 'east', 'east', 
+                                     'east', 'east', 'east', 'east',
+                                     'east', 'east', 'east', 'east',
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west', 'west', 'west'),
+                          trend = c('yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+                                    'no', 'no', 'no', 'no', 'no', 'no',
+                                    'yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+                                    'no', 'no', 'no', 'no', 'no', 'no'),
+                          value = c(-14.2, -7.82, -15.94, -11.53, -17.96, -15.85,
+                                    2.62, 5.59, 0.87, 1.87, -1.14, -2.44,
+                                    -15.11, -9.76, -12.36, -16.33, -17.37, -14.6,
+                                    1.71, 3.64, 1.04, 0.49, -0.56, -1.19
+                                    ))
+plant_delay_days_predicted$yID<- with(plant_delay_days_predicted, paste0(case, intensity))
+plant_delay_days_predicted$xID<- with(plant_delay_days_predicted, paste0(region, trend))
+
+plant_delay_percent_predicted <- data.frame(case = c('worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best'),
+                          intensity = c('SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC'), 
+                          region = c('east', 'east', 'east', 'east', 
+                                     'east', 'east', 'east', 'east',
+                                     'east', 'east', 'east', 'east',
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west', 'west', 'west'),
+                          trend = c('yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+                                    'no', 'no', 'no', 'no', 'no', 'no',
+                                    'yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+                                    'no', 'no', 'no', 'no', 'no', 'no'),
+                          value = c(44.91, 61.35, 18.33, 24.14, 0, 0,
+                                    0, 6.77, 0, 0, 0, 0,
+                                    44.81, 53.22, 23.02, 24.02, 13.07, 13.64,
+                                    0, 0, 0, 0, 0, 0
+                                    ))
+plant_delay_percent_predicted$yID<- with(plant_delay_percent_predicted, paste0(case, intensity))
+plant_delay_percent_predicted$xID<- with(plant_delay_percent_predicted, paste0(region, trend))
+
+DC_not_possible_predicted <- data.frame(case = c('worst', 'medium', 'best',
+                                                 'worst', 'medium', 'best',
+                                                 'worst', 'medium', 'best',
+                                                 'worst', 'medium', 'best'),
+                          region = c('east', 'east', 'east', 'east', 'east', 'east', 
+                                     'west', 'west', 'west', 'west', 'west', 'west'),
+                          trend = c('yes', 'yes', 'yes', 
+                                    'no', 'no', 'no', 
+                                    'yes', 'yes', 'yes', 
+                                    'no', 'no', 'no'),
+                          value = c(73.86, 11.98, 0, 100, 42.18, 8.95, 
+                                    21.07, 0, 0, 75.26, 9.49, 0))
+DC_not_possible_predicted$yID<- with(DC_not_possible_predicted, paste0(case))
+DC_not_possible_predicted$xID<- with(DC_not_possible_predicted, paste0(region, trend))
+
+plant_window_predicted <- data.frame(case = c('worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best'),
+                          intensity = c('SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC'), 
+                          region = c('east', 'east', 'east', 'east', 
+                                     'east', 'east', 
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west'),
+                          value = c(101.34, 0, 133.99, 23.99, 161.9, 51.9,
+                                    118.5, 8.48, 147.35, 37.35, 169.36, 59.36))
+plant_window_predicted$yID<- with(plant_window_predicted, paste0(case, intensity))
+plant_window_predicted$xID<- with(plant_window_predicted, paste0(region))
+
+ggplot(data = plant_delay_days_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(plant_delay_days_predicted$value, 1))) + # write the values
+  scale_fill_gradient2(name = "Days", low = "blue", high = "red", midpoint = 0) +
+  ggtitle("Average delay in planting date in average 25km cell") +
+  theme_bw()
+
+ggplot(data = plant_delay_percent_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(plant_delay_percent_predicted$value, 1))) + # write the values
+  scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
+  ggtitle("Percent planting that must be delayed in average 25km cell") +
+  theme_bw()
+
+ggplot(data = DC_not_possible_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(DC_not_possible_predicted$value, 1))) + # write the values
+  scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
+  ggtitle("Percent double cropping that's infeasible in average 25km cell") +
+  theme_bw()
+
+ggplot(data = plant_window_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(plant_window_predicted$value, 1))) + # write the values
+  scale_fill_gradient(name = "Days", low = "red", high = "white") +
+  ggtitle("Planting window in average 25km cell") +
+  theme_bw()
+
+```
+
+## plot of onset, demise predictions
+
+```{r}
+
+library(tidyr)
+nw_predictions <- read.csv(paste0(first_folder,'/R-code2/ModelingPaper/northwest_MT_prediction_csv.csv'))
+ne_predictions <- read.csv(paste0(first_folder,'/R-code2/ModelingPaper/northeast_MT_prediction_csv.csv'))
+
+# CHANGE ONSET AND DEMISE from days after July 1 (the input) to days after Aug 1
+nw_predictions$outoday <- nw_predictions$outoday - 31
+nw_predictions$outeday <- nw_predictions$outeday - 31
+ne_predictions$outoday <- ne_predictions$outoday - 31
+ne_predictions$outeday <- ne_predictions$outeday - 31
+
+nw_predictions_tidy <- nw_predictions %>% 
+  rename(onset = outoday, demise = outeday) %>%
+  gather("wet_season_metric", "day", 2:3)
+
+ne_predictions_tidy <- ne_predictions %>% 
+  rename(onset = outoday, demise = outeday) %>%
+  gather("wet_season_metric", "day", 2:3)
+
+nw_predictions <- nw_predictions %>% 
+  rename(onset = outoday, demise = outeday, length = outslen)
+
+ne_predictions <- ne_predictions %>% 
+  rename(onset = outoday, demise = outeday, length = outslen)
+
+nw_onset_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'onset'])
+nw_onset_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'onset'])
+nw_demise_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'demise'])
+nw_demise_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'demise'])
+nw_length_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'length'])
+nw_length_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'length'])
+
+ne_onset_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'onset'])
+ne_onset_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'onset'])
+ne_demise_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'demise'])
+ne_demise_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'demise'])
+ne_length_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'length'])
+ne_length_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'length'])
+
+# plot onset and demise
+ggplot(nw_predictions_tidy) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=50, ymax=400), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = day, color = wet_season_metric)) +
+  geom_segment(aes(x = 1970, y = nw_onset_mean_before, xend = 2000, yend = nw_onset_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 1970, y = nw_demise_mean_before, xend = 2000, yend = nw_demise_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = nw_onset_mean_after, xend = 2049, yend = nw_onset_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = nw_demise_mean_after, xend = 2049, yend = nw_demise_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  ggtitle('Predictions for northwest Mato Grosso') +
+  ylab('Days after Aug 1') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 375, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 375, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+ggplot(ne_predictions_tidy) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=50, ymax=400), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = day, color = wet_season_metric)) +
+  geom_segment(aes(x = 1970, y = ne_onset_mean_before, xend = 2000, yend = ne_onset_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 1970, y = ne_demise_mean_before, xend = 2000, yend = ne_demise_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = ne_onset_mean_after, xend = 2049, yend = ne_onset_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = ne_demise_mean_after, xend = 2049, yend = ne_demise_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  ggtitle('Predictions for northeast Mato Grosso') +
+  ylab('Days after Aug 1') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 375, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 375, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+# plot wet season length
+ggplot(nw_predictions) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=150, ymax=320), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = length)) +
+  geom_segment(aes(x = 1970, y = nw_length_mean_before, xend = 2000, yend = nw_length_mean_before), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = nw_length_mean_after, xend = 2049, yend = nw_length_mean_after), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_hline(yintercept = 200, color = 'red') +
+  ggtitle('Predictions for northwest Mato Grosso') +
+  ylab('Wet season length') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 300, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+ggplot(ne_predictions) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=150, ymax=320), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = length)) +
+  geom_segment(aes(x = 1970, y = ne_length_mean_before, xend = 2000, yend = ne_length_mean_before), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = ne_length_mean_after, xend = 2049, yend = ne_length_mean_after), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_hline(yintercept = 200, color = 'red') +
+  ggtitle('Predictions for northeast Mato Grosso') +
+  ylab('Wet season length') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 300, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+```
+
+# correlation between onset and demise
+```{r}
+
+library(fmsb) # calculate percentile
+
+corr_nw <- cor.test(nw_predictions$onset, nw_predictions$demise)
+corr_ne <- cor.test(ne_predictions$onset, ne_predictions$demise)
+corr_nw_est <- round(corr_nw$estimate, 3)[1]
+corr_ne_est <- round(corr_ne$estimate, 3)[1]
+corr_nw_pval <- round(corr_nw$p.value, 3)
+corr_ne_pval <- round(corr_ne$p.value, 3)
+
+corr_nw_plot <- ggplot(nw_predictions, aes(x = onset, y = demise)) +
+  geom_point() +
+  geom_smooth(method=lm, se=FALSE) +
+  ggtitle('Northwest MT') +
+  annotate("text", x = 25, y = 250, color = "red", 
+           label = paste0("Pearson correlation: ", corr_nw_est, ", \n p-value: ", corr_nw_pval)) +
+  theme_bw()
+
+corr_ne_plot <- ggplot(ne_predictions, aes(x = onset, y = demise)) +
+  geom_point() +
+  geom_smooth(method=lm, se=FALSE) +
+  ggtitle('Northeast MT') +
+  annotate("text", x = 30, y = 220, color = "red", 
+           label = paste0("Pearson correlation: ", corr_ne_est, ", \n p-value: ", corr_ne_pval)) +
+  theme_bw()
+
+print(corr_nw_plot)
+print(corr_ne_plot)
+
+# figure out if we want medium or late onset to pair with early, medium demise
+# convert onset, demise into percentiles
+nw_predictions$onset_percentile <- percentile(nw_predictions$onset)
+nw_predictions$demise_percentile <- percentile(nw_predictions$demise)
+nw_predictions$length_percentile <- percentile(nw_predictions$length)
+
+ne_predictions$onset_percentile <- percentile(ne_predictions$onset)
+ne_predictions$demise_percentile <- percentile(ne_predictions$demise)
+ne_predictions$length_percentile <- percentile(ne_predictions$length)
+
+# get 10th, 50th percentile demise, and for those years, get the onset percentile
+nw_medDemise_onsetPer <- nw_predictions[nw_predictions$demise_percentile >= 45 & 
+                                          nw_predictions$demise_percentile <= 55, 
+                                       'onset_percentile']
+
+ne_medDemise_onsetPer <- ne_predictions[ne_predictions$demise_percentile >= 45 & 
+                                          ne_predictions$demise_percentile <= 55, 
+                                       'onset_percentile']
+
+nw_earlyDemise_onsetPer <- nw_predictions[nw_predictions$demise_percentile >= 5 & 
+                                          nw_predictions$demise_percentile <= 15, 
+                                       'onset_percentile']
+
+ne_earlyDemise_onsetPer <- ne_predictions[ne_predictions$demise_percentile >= 5 & 
+                                          ne_predictions$demise_percentile <= 15, 
+                                       'onset_percentile']
+
+nw_onset_demise_pairing <- rbind(data.frame(demise_percentile = 50, 
+                                            onset_percentile = nw_medDemise_onsetPer),
+                                 data.frame(demise_percentile = 10, 
+                                            onset_percentile = nw_earlyDemise_onsetPer))
+nw_onset_demise_pairing$demise_percentile <- as.factor(nw_onset_demise_pairing$demise_percentile)
+
+ne_onset_demise_pairing <- rbind(data.frame(demise_percentile = 50, 
+                                            onset_percentile = ne_medDemise_onsetPer),
+                                 data.frame(demise_percentile = 10, 
+                                            onset_percentile = ne_earlyDemise_onsetPer))
+ne_onset_demise_pairing$demise_percentile <- as.factor(ne_onset_demise_pairing$demise_percentile)
+
+nw_onset_demise_boxplot <- ggplot(nw_onset_demise_pairing, aes(x = demise_percentile, y = onset_percentile)) +
+  geom_boxplot() +
+  geom_hline(yintercept=50, linetype="dashed", color = "blue") +
+  xlab('Demise percentile') +
+  ylab('Onset percentile') +
+  ggtitle('Northwest MT') +
+  theme_bw()
+
+ne_onset_demise_boxplot <- ggplot(ne_onset_demise_pairing, aes(x = demise_percentile, y = onset_percentile)) +
+  geom_boxplot() +
+  geom_hline(yintercept=50, linetype="dashed", color = "blue") +
+  xlab('Demise percentile') +
+  ylab('Onset percentile') +
+  ggtitle('Northeast MT') +
+  theme_bw()
+
+print(nw_onset_demise_boxplot)
+print(ne_onset_demise_boxplot)
 
 ```
