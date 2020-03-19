@@ -255,6 +255,10 @@ for (intensity in c('SC', 'DC')) {
     percentile50_obs <- observations[observations$percentile == 50, 'plant']
     percentile75_obs <- observations[observations$percentile == 75, 'plant']
     percentile95_obs <- observations[observations$percentile == 95, 'plant']
+    
+    print(paste(intensity, region))
+    print('observed planting window')
+    print(percentile95_obs - percentile5_obs)
       
     # calculate number of days available for planting
     window <- max(0, pred_latest_plant - pred_onset) # if latest plant is before onset, window = 0
@@ -642,7 +646,15 @@ ne_predictions$onset_percentile <- percentile(ne_predictions$onset)
 ne_predictions$demise_percentile <- percentile(ne_predictions$demise)
 ne_predictions$length_percentile <- percentile(ne_predictions$length)
 
-# get 10th, 50th percentile demise, and for those years, get the onset percentile
+# get 10th, 50th, 90th percentile demise, and for those years, get the onset percentile
+nw_lateDemise_onsetPer <- nw_predictions[nw_predictions$demise_percentile >= 85 & 
+                                          nw_predictions$demise_percentile <= 95, 
+                                       'onset_percentile']
+
+ne_lateDemise_onsetPer <- ne_predictions[ne_predictions$demise_percentile >= 85 & 
+                                          ne_predictions$demise_percentile <= 95, 
+                                       'onset_percentile']
+
 nw_medDemise_onsetPer <- nw_predictions[nw_predictions$demise_percentile >= 45 & 
                                           nw_predictions$demise_percentile <= 55, 
                                        'onset_percentile']
@@ -659,22 +671,26 @@ ne_earlyDemise_onsetPer <- ne_predictions[ne_predictions$demise_percentile >= 5 
                                           ne_predictions$demise_percentile <= 15, 
                                        'onset_percentile']
 
-nw_onset_demise_pairing <- rbind(data.frame(demise_percentile = 50, 
+nw_onset_demise_pairing <- rbind(data.frame(demise_percentile = 'late', 
+                                            onset_percentile = nw_lateDemise_onsetPer),
+                                  data.frame(demise_percentile = 'middle', 
                                             onset_percentile = nw_medDemise_onsetPer),
-                                 data.frame(demise_percentile = 10, 
+                                 data.frame(demise_percentile = 'early', 
                                             onset_percentile = nw_earlyDemise_onsetPer))
 nw_onset_demise_pairing$demise_percentile <- as.factor(nw_onset_demise_pairing$demise_percentile)
 
-ne_onset_demise_pairing <- rbind(data.frame(demise_percentile = 50, 
+ne_onset_demise_pairing <- rbind(data.frame(demise_percentile = 'late', 
+                                            onset_percentile = ne_lateDemise_onsetPer),
+                                 data.frame(demise_percentile = 'middle', 
                                             onset_percentile = ne_medDemise_onsetPer),
-                                 data.frame(demise_percentile = 10, 
+                                 data.frame(demise_percentile = 'early', 
                                             onset_percentile = ne_earlyDemise_onsetPer))
 ne_onset_demise_pairing$demise_percentile <- as.factor(ne_onset_demise_pairing$demise_percentile)
 
 nw_onset_demise_boxplot <- ggplot(nw_onset_demise_pairing, aes(x = demise_percentile, y = onset_percentile)) +
   geom_boxplot() +
   geom_hline(yintercept=50, linetype="dashed", color = "blue") +
-  xlab('Demise percentile') +
+  xlab('Demise category') +
   ylab('Onset percentile') +
   ggtitle('Northwest MT') +
   theme_bw()
@@ -682,7 +698,7 @@ nw_onset_demise_boxplot <- ggplot(nw_onset_demise_pairing, aes(x = demise_percen
 ne_onset_demise_boxplot <- ggplot(ne_onset_demise_pairing, aes(x = demise_percentile, y = onset_percentile)) +
   geom_boxplot() +
   geom_hline(yintercept=50, linetype="dashed", color = "blue") +
-  xlab('Demise percentile') +
+  xlab('Demise category') +
   ylab('Onset percentile') +
   ggtitle('Northeast MT') +
   theme_bw()
