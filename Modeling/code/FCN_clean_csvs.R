@@ -411,6 +411,22 @@ rename_cols_median_CARpoly <- function(median_CARpoly_raw) {
   return(output)
 }
 
+rename_cols_median_CARpoly2 <- function(median_CARpoly_raw) {
+  output = median_CARpoly_raw %>%
+    rename(
+      latitude = latitude_median,
+      longitude = longitude_median,
+      onset = onset_median,
+      double_area_km2 = double_area_km2_sum,
+      single_area_km2 = single_area_km2_sum,
+      total_planted_area_km2 = total_planted_area_km2_sum,
+      year = year_median
+    ) %>%
+    filter(year > 0)
+  
+  return(output)
+}
+
 rename_cols_percentile5_CARpoly <- function(percentile5_CARpoly_raw) {
   output = percentile5_CARpoly_raw %>%
     rename(
@@ -418,6 +434,19 @@ rename_cols_percentile5_CARpoly <- function(percentile5_CARpoly_raw) {
       double_harvest_percentile5 = double_harvest,
       double_plant_percentile5 = double_plant,
       single_delay_percentile5 = single_delay,
+      single_harvest_percentile5 = single_harvest,
+      single_plant_percentile5 = single_plant
+    ) %>%
+    filter(year > 0)
+  
+  return(output)
+}
+
+rename_cols_percentile5_CARpoly2 <- function(percentile5_CARpoly_raw) {
+  output = percentile5_CARpoly_raw %>%
+    rename(
+      double_harvest_percentile5 = double_harvest,
+      double_plant_percentile5 = double_plant,
       single_harvest_percentile5 = single_harvest,
       single_plant_percentile5 = single_plant
     ) %>%

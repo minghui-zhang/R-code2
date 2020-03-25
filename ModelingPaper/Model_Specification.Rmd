@@ -27,7 +27,7 @@ library(Metrics)
 library(randomForest)
 
 # select the onset definition
-onset_type <- 'AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km', 'freq_10_persiann'# 'Gabriel_onset'
+onset_type <- 'freq_8_chirps_ATchirps5km' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km', 'freq_10_persiann', 'AA_25_persiann'# 'Gabriel_onset'
 
 # import data for all sections
 os_system <- 'windows' # mac for laptop or windows for desktop
@@ -170,14 +170,17 @@ NOTE, couldn't get spatial data or export csv data using onset_type; this is for
 
 ```{r}
 
-median_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/median_CARpoly_v2.csv')
-percentile5_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
-percentile95_CARpoly_raw <- read.csv('E:/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
+median_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                            '/median_CARpoly_', onset_type, '.csv')) #read.csv('E:/R-code2/Modeling/data/median_CARpoly_v2.csv')
+percentile5_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                            '/percentile5_CARpoly_', onset_type, '.csv')) #read.csv('E:/R-code2/Modeling/data/percentile5_CARpoly_v2.csv')
+#percentile95_CARpoly_raw <- read.csv(paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+#                            '/percentile95_CARpoly_', onset_type, '.csv')) #read.csv('E:/R-code2/Modeling/data/percentile95_CARpoly_v2.csv')
 
-median_CARpoly_raw <- rename_cols_median_CARpoly(median_CARpoly_raw)
-percentile5_CARpoly_raw <- rename_cols_percentile5_CARpoly(percentile5_CARpoly_raw)
-percentile95_CARpoly_raw <- rename_cols_percentile95_CARpoly(percentile95_CARpoly_raw)
-CARpoly_raw <- create_CARpoly_raw(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw)
+median_CARpoly_raw <- rename_cols_median_CARpoly2(median_CARpoly_raw)
+percentile5_CARpoly_raw <- rename_cols_percentile5_CARpoly2(percentile5_CARpoly_raw)
+#percentile95_CARpoly_raw <- rename_cols_percentile95_CARpoly(percentile95_CARpoly_raw)
+CARpoly_raw <- create_CARpoly_raw(median_CARpoly_raw, percentile5_CARpoly_raw) #, percentile95_CARpoly_raw)
 
 CARpoly_tidy <- tidy_CARpoly(CARpoly_raw)
 
@@ -1817,6 +1820,16 @@ for (n in 1:n_data_bootstrap) {
 
 ```
 
+# save data_bootstrap_coefs (every bootstrapped coef for each planting dataset)
+
+```{r}
+
+saveRDS(data_bootstrap_coefs, paste0("intermediateFE_bootstrapped_coefs_", onset_type, ".rds"))
+
+data_bootstrap_coefs <- readRDS(paste0("intermediateFE_bootstrapped_coefs_", onset_type, ".rds"))
+```
+
+
 ```{r}
 
 final_bootstrap_coefs <- data.frame(intensity = character(0), percentile = character(0),
@@ -1868,23 +1881,50 @@ names(year_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median',
                             'DC_percentile75', 'DC_percentile95')
 
 # compare coefs across intensities and groups
-diff_intensities_median <- t.test(onset_coefs_list[['SC_median']], onset_coefs_list[['DC_median']])$p.value
-diff_intensities_percentile25 <- t.test(onset_coefs_list[['SC_percentile25']], onset_coefs_list[['DC_percentile25']])$p.value
-diff_intensities_percentile5 <- t.test(onset_coefs_list[['SC_percentile5']], onset_coefs_list[['DC_percentile5']])$p.value
-diff_intensities_percentile75 <- t.test(onset_coefs_list[['SC_percentile75']], onset_coefs_list[['DC_percentile75']])$p.value
-diff_intensities_percentile95 <- t.test(onset_coefs_list[['SC_percentile95']], onset_coefs_list[['DC_percentile95']])$p.value
+num_samples_ttest <- 100 # the number of samples to take in the t test. more samples -> lower p value. total samples: 10000
+diff_intensities_median <- t.test(onset_coefs_list[['SC_median']][0:num_samples_ttest], 
+                                  onset_coefs_list[['DC_median']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_intensities_percentile25 <- t.test(onset_coefs_list[['SC_percentile25']][0:num_samples_ttest], 
+                                        onset_coefs_list[['DC_percentile25']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_intensities_percentile5 <- t.test(onset_coefs_list[['SC_percentile5']][0:num_samples_ttest], 
+                                       onset_coefs_list[['DC_percentile5']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_intensities_percentile75 <- t.test(onset_coefs_list[['SC_percentile75']][0:num_samples_ttest], 
+                                        onset_coefs_list[['DC_percentile75']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_intensities_percentile95 <- t.test(onset_coefs_list[['SC_percentile95']][0:num_samples_ttest], 
+                                        onset_coefs_list[['DC_percentile95']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
 
-diff_percentile5_25_SC <- t.test(onset_coefs_list[['SC_percentile5']], onset_coefs_list[['SC_percentile25']])$p.value
-diff_percentile5_25_DC <- t.test(onset_coefs_list[['DC_percentile5']], onset_coefs_list[['DC_percentile25']])$p.value
+diff_percentile5_25_SC <- t.test(onset_coefs_list[['SC_percentile5']][0:num_samples_ttest], 
+                                 onset_coefs_list[['SC_percentile25']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_percentile5_25_DC <- t.test(onset_coefs_list[['DC_percentile5']][0:num_samples_ttest], 
+                                 onset_coefs_list[['DC_percentile25']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
 
-diff_percentile25_50_SC <- t.test(onset_coefs_list[['SC_percentile25']], onset_coefs_list[['SC_median']])$p.value
-diff_percentile25_50_DC <- t.test(onset_coefs_list[['DC_percentile25']], onset_coefs_list[['DC_median']])$p.value
+diff_percentile25_50_SC <- t.test(onset_coefs_list[['SC_percentile25']][0:num_samples_ttest], 
+                                  onset_coefs_list[['SC_median']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_percentile25_50_DC <- t.test(onset_coefs_list[['DC_percentile25']][0:num_samples_ttest], 
+                                  onset_coefs_list[['DC_median']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
 
-diff_percentile50_75_SC <- t.test(onset_coefs_list[['SC_median']], onset_coefs_list[['SC_percentile75']])$p.value
-diff_percentile50_75_DC <- t.test(onset_coefs_list[['DC_median']], onset_coefs_list[['DC_percentile75']])$p.value
+diff_percentile50_75_SC <- t.test(onset_coefs_list[['SC_median']][0:num_samples_ttest], 
+                                  onset_coefs_list[['SC_percentile75']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_percentile50_75_DC <- t.test(onset_coefs_list[['DC_median']][0:num_samples_ttest], 
+                                  onset_coefs_list[['DC_percentile75']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
 
-diff_percentile75_95_SC <- t.test(onset_coefs_list[['SC_percentile75']], onset_coefs_list[['SC_percentile95']])$p.value
-diff_percentile75_95_DC <- t.test(onset_coefs_list[['DC_percentile75']], onset_coefs_list[['DC_percentile95']])$p.value
+diff_percentile75_95_SC <- t.test(onset_coefs_list[['SC_percentile75']][0:num_samples_ttest], 
+                                  onset_coefs_list[['SC_percentile95']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_percentile75_95_DC <- t.test(onset_coefs_list[['DC_percentile75']][0:num_samples_ttest], 
+                                  onset_coefs_list[['DC_percentile95']][0:num_samples_ttest], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
 
 print('p values comparing intensities: (for percentile95, to percentile5)')
 print(paste(diff_intensities_percentile95, diff_intensities_percentile95, diff_intensities_median, diff_intensities_percentile25, diff_intensities_percentile5))
@@ -1925,4 +1965,10 @@ print(year_coef_plot)
 
 # SAVED RESULTS
 saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
+```
+
+```{r}
+
+coefs_onset_oi <- readRDS(paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
+
 ```

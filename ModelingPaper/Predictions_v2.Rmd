@@ -138,14 +138,31 @@ year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 
 # onset regions and change
 
-# 10th percentile: vulnerable = -10; no vulnerable = -5
-# 50th percentile: vulnerable = 5; not vulnerable = 3
-# 90th percentile: vulnerable = 20; not vulnerable = 13
-case_name <- 'lateOn_earlyDem' # CHANGE THIS
-onset_change_vulnerable <- 20.92 # CHANGE THIS
-onset_change_not_vulnerable <- 13.64 # CHANGE THIS
-demise_change_vulnerable <- -26.42 # CHANGE THIS
-demise_change_not_vulnerable <- -22.83 # CHANGE THIS
+case_name <- 'earlyOn_lateDem' # lateOn_earlyDem, medOn_medDem, earlyOn_lateDem
+
+# WORST CASE
+
+
+if (case_name == 'lateOn_earlyDem') {
+  onset_change_vulnerable <- 20.92
+  onset_change_not_vulnerable <- 13.64
+  demise_change_vulnerable <- -26.42
+  demise_change_not_vulnerable <- -22.83
+}
+
+if (case_name == 'medOn_medDem') {
+  onset_change_vulnerable <- 6.99 # CHANGE THIS
+  onset_change_not_vulnerable <- 3.91 # CHANGE THIS
+  demise_change_vulnerable <- -7.7 # CHANGE THIS
+  demise_change_not_vulnerable <- -3.69 # CHANGE THIS
+}
+
+if (case_name == 'earlyOn_lateDem') {
+  onset_change_vulnerable <- -9.16
+  onset_change_not_vulnerable <- -4.48
+  demise_change_vulnerable <- 4.06
+  demise_change_not_vulnerable <- 9.93
+}
 
 region_cutoff <- -54 # longitude; to the west, 'not_vulnerable' and to the east, 'vulnerable'
 
@@ -255,10 +272,6 @@ for (intensity in c('SC', 'DC')) {
     percentile50_obs <- observations[observations$percentile == 50, 'plant']
     percentile75_obs <- observations[observations$percentile == 75, 'plant']
     percentile95_obs <- observations[observations$percentile == 95, 'plant']
-    
-    print(paste(intensity, region))
-    print('observed planting window')
-    print(percentile95_obs - percentile5_obs)
       
     # calculate number of days available for planting
     window <- max(0, pred_latest_plant - pred_onset) # if latest plant is before onset, window = 0
@@ -327,14 +340,45 @@ for (intensity in c('SC', 'DC')) {
     if (intensity == 'SC') {max_xlim <- 230}
     if (intensity == 'DC') {max_xlim <- 130}
     
+    # for plotting, interpolate predicted plant to pred_onset and pred_latest_plant, then 
+    #filter predictions to be only between pred_onset and pred_latest_plant (for plotting)
+    predictions_filtered <- predictions # to save interpolated and filtered results
+    for (type in c('pred_onset_change', 'pred_onset_year_change')) {
+      
+      # get percentile and planting date
+      pred_percentile <- predictions[predictions$type == type, 'percentile']
+      pred_plant <- predictions[predictions$type == type, 'plant']
+      
+      # interpolate the planting percentile at onset and latest plant dates
+      onset_percentile <- approx(pred_plant, pred_percentile, xout = pred_onset)$y
+      latest_plant_percentile <- approx(pred_plant, pred_percentile, xout = pred_latest_plant)$y
+      
+      # add interpolated points to predictions_filtered
+      predictions_filtered <- rbind(predictions_filtered, data.frame(percentile = c(onset_percentile, latest_plant_percentile), 
+                                             plant = c(pred_onset, pred_latest_plant), 
+                                             type = type))
+
+    }
+    
+    # filter predicted CDF lines, but not the observed line
+    predictions_filtered <- rbind(predictions_filtered[predictions_filtered$plant >= pred_onset & 
+                                                   predictions_filtered$plant <= pred_latest_plant & 
+                                                   predictions_filtered$type != 'observed',],
+                                  predictions[predictions$type == 'observed' ,])
+    
     predictions_plot <- ggplot(predictions) +
-      geom_line(mapping = aes(x = plant, y = percentile, col = type)) +
-      geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
-      geom_vline(mapping = aes(xintercept = obs_onset), col = 'blue') +
-      geom_vline(mapping = aes(xintercept = pred_onset), col = 'blue', linetype = 'dashed') +
-      geom_vline(mapping = aes(xintercept = obs_latest_plant), col = 'red') +
-      geom_vline(mapping = aes(xintercept = pred_latest_plant), col = 'red', linetype = 'dashed') +
+      geom_line(mapping = aes(x = plant, y = percentile, col = type), size = 1, alpha = 0.3) +
+      geom_line(data = predictions_filtered, mapping = aes(x = plant, y = percentile, col = type), size = 1) +
+      scale_color_manual(values=c("black", '#CC0000', '#006600')) +
+      #geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
+      geom_vline(mapping = aes(xintercept = obs_onset), col = '#3498DB', size = 1, alpha = 0.5) +
+      geom_vline(mapping = aes(xintercept = pred_onset), col = '#3498DB', linetype = 'dashed',  size = 1, alpha = 0.5) +
+      geom_vline(mapping = aes(xintercept = obs_latest_plant), col = '#21618C',  size = 1, alpha = 0.5) +
+      geom_vline(mapping = aes(xintercept = pred_latest_plant), col = '#21618C', linetype = 'dashed', size = 1, alpha = 0.5) +
+      geom_segment(aes(x=obs_onset, xend=pred_onset, y=60, yend=60), size = 1, color = '#3498DB', alpha = 0.05, arrow = arrow()) +
+      geom_segment(aes(x=obs_latest_plant, xend=pred_latest_plant, y=40, yend=40), size = 1, color = '#21618C', alpha = 0.05, arrow = arrow()) +
       ggtitle(paste('Planting CDF',intensity, region, 'region', 'case', case_name)) +
+      xlab('DOY after Aug 1') +
       xlim(30, max_xlim) +
       theme_bw()
       
@@ -342,7 +386,7 @@ for (intensity in c('SC', 'DC')) {
   }
 }
 
-print(predictions_summary)
+#print(predictions_summary)
 
 ```
 
