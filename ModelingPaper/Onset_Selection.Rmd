@@ -538,7 +538,7 @@ READ AN INDIVIDUAL ONSET FOR MAPPING
 ```{r}
 
 # import data for onset_oi
-onset_oi <- 'freq_10_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann' # 'rangethres_10_15_20_30_persiann'
+onset_oi <- 'freq_8_chirps_ATchirps5km' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann' # 'rangethres_10_15_20_30_persiann'
 onset_baseline <- 'AA_25_persiann' # to compare to onset_oi in difference maps, etc 'AA_25_persiann'
 onset_third <- 'rangethres_10_15_20_30_persiann' # just to plot the timeseries
 
@@ -1197,6 +1197,9 @@ for (intensity in c("SC", "DC")) {
 }
 
 print(elimpred_results)
+# change the levels of the percentile and cropping intensity for plotting
+levels(elimpred_results$percentile) <- c('5th percentile', '25th percentile', '50th percentile', '75th percentile', '95th percentile')
+levels(elimpred_results$intensity) <- c('Single cropped', 'Double cropped')
 
 # different degrees of eliminated predictors on x axis, and onset coef on y axis
 

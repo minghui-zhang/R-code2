@@ -38,7 +38,7 @@ clean_raw_data = function(data_raw, year) {
   
   # specify that original 'year' in data is actually harvest year
   data_raw$harvest_year <- data_raw$year
-  data <- select(data_raw, -year)
+  data <- dplyr::select(data_raw, -year)
   
   data_year <- data[data$harvest_year == year,]
   
@@ -58,7 +58,7 @@ clean_raw_data = function(data_raw, year) {
   data_year <- filter(data_year, data_year$EVI <= 5 & data_year$EVI >= -0.5)
   
   # take out unnecessary columns
-  data_year <- select(data_year, -c(sur_refl_b01, sur_refl_b02, sur_refl_b03, sur_refl_b04, sur_refl_b05, sur_refl_b07, system.time_start))
+  data_year <- dplyr::select(data_year, -c(sur_refl_b01, sur_refl_b02, sur_refl_b03, sur_refl_b04, sur_refl_b05, sur_refl_b07, system.time_start))
   
   return(data_year)
 }
@@ -98,44 +98,47 @@ get_data_per10days = function(data) {
 ```{r computations}
 # clean the raw data (add EVI and month, get rid of unnecessary columns)
 agsat <- clean_raw_data(agsat_raw, year) #%>% select(-sur_refl_b06)
-plos <- clean_raw_data(plos_raw, year) %>% select(-old_class)
+plos <- clean_raw_data(plos_raw, year) %>% dplyr::select(-old_class)
 plos_oldclass <- clean_raw_data(plos_raw, year)
 
+# rename class for plotting
+levels(agsat$class) <- c("Single cropped soy", "Double cropped soy", "Non-soy agriculture")
+levels(plos$class) <- c("Single cropped soy", "Double cropped soy", "Non-soy agriculture")
 
 # calculate EVI by ten day intervals
 agsat_10days <- get_data_per10days(agsat)
 plos_10days <- get_data_per10days(plos)
 
-ggplot(plos, aes(x = DayOfYear, y = EVI, col = class)) +
-  geom_point(alpha = 0.01) +
-  ggtitle(paste("EVI for plos points in", year)) +
-  stat_smooth() +
-  theme_linedraw() +
-  ylim(0, 2.5)
+# ggplot(plos, aes(x = DayOfYear, y = EVI, col = class)) +
+#   geom_point(alpha = 0.01) +
+#   ggtitle(paste("EVI for plos points in", year)) +
+#   stat_smooth() +
+#   theme_linedraw() +
+#   ylim(0, 2.5)
 
 ggplot(agsat, aes(x = DayOfYear, y = EVI, col = class)) +
-  geom_point(alpha = 0.01) +
+  #geom_point(alpha = 0.01) +
   ggtitle(paste("EVI for agsat points in", year)) +
   stat_smooth() +
   theme_linedraw() +
   ylim(0, 2.5)
 
-ggplot(plos_10days, aes(x = DOY_round, y = EVI, col = class)) +
-  geom_point(alpha = 0.01) +
-  ggtitle(paste("EVI for plos points in", year, "for 10 day intervals")) +
-  stat_smooth() +
-  theme_linedraw() +
-  ylim(0, 2.5)
+# ggplot(plos_10days, aes(x = DOY_round, y = EVI, col = class)) +
+#   geom_point(alpha = 0.01) +
+#   ggtitle(paste("EVI for plos points in", year, "for 10 day intervals")) +
+#   stat_smooth() +
+#   theme_linedraw() +
+#   ylim(0, 2.5)
 
 ggplot(agsat_10days, aes(x = DOY_round, y = EVI, col = class)) +
-  geom_point(alpha = 0.01) +
+  #geom_point(alpha = 0.01) +
   ggtitle(paste("EVI for agsat points in", year, "for 10 day intervals")) +
   stat_smooth() +
   theme_linedraw() +
   ylim(0, 2.5)
 
 ggplot(agsat_10days, aes(x = DOY_round, y = EVI)) +
-  geom_point(alpha = 0.01) +
+  #geom_point(alpha = 0.01) +
   ggtitle(paste("EVI for agsat points in", year, "for 10 day intervals")) +
   stat_smooth() +
   theme_linedraw() +

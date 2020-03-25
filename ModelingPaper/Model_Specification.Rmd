@@ -1590,7 +1590,7 @@ for (intensity in c("DC", "SC")) {
     # residual vs fitted value plot (look for no pattern and constant variance) --------------------
     plot(x = as.numeric(data_subset$fitted.values), y = as.numeric(data_subset$residuals), 
          main = paste("fitted values vs residuals", intensity, percentile), 
-         xlab = 'fitted value', ylab = 'residual')
+         xlab = 'de-meaned fitted value', ylab = 'residual')
     abline(h = 0, col = 'red')
     
     # residual vs index (look for no pattern) ------------------------------------------------------
@@ -1943,6 +1943,10 @@ print(paste(diff_percentile75_95_SC, diff_percentile75_95_DC))
 
 
 print(final_bootstrap_coefs)
+
+# rename levels for plotting
+levels(final_bootstrap_coefs$intensity) <- c('Single cropped', 'Double cropped')
+levels(final_bootstrap_coefs$percentile) <- c('5th', '25th', '50th', '75th', '95th')
 
 onset_coef_plot <- ggplot(final_bootstrap_coefs) +
   geom_point(aes(x = percentile, y = onset_coef)) + 

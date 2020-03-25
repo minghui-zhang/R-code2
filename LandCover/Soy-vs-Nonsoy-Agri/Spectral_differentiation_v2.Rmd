@@ -36,7 +36,7 @@ clean_raw_data = function(data_raw, year) {
   
   # specify that original 'year' in data is actually harvest year
   data_raw$harvest_year <- data_raw$year
-  data <- select(data_raw, -year)
+  data <- dplyr::select(data_raw, -year)
   
   data_year <- data[data$harvest_year == year,]
   
@@ -86,8 +86,8 @@ calculate_summary = function(tidy, year) {
   
   # calculate mean and stdev of reflectance per (band x class x month)
   split <- tidy %>% split(f = list(tidy$class, tidy$month, tidy$band_id))
-  means <- sapply(split, FUN = select, value) %>% lapply(mean, na.rm = TRUE) %>% unlist()
-  stdevs <- sapply(split, FUN = select, value) %>% lapply(sd, na.rm = TRUE) %>% unlist()
+  means <- sapply(split, FUN = dplyr::select, value) %>% lapply(mean, na.rm = TRUE) %>% unlist()
+  stdevs <- sapply(split, FUN = dplyr::select, value) %>% lapply(sd, na.rm = TRUE) %>% unlist()
   
   summary <- data.frame(class.month.band_id.value = names(means), 
                               mean = means, stdev = stdevs)
@@ -100,8 +100,8 @@ calculate_summary_indices = function(tidy, year) {
   
   # calculate mean and stdev of reflectance per (band x class x month)
   split <- tidy %>% split(f = list(tidy$class, tidy$month, tidy$variable))
-  means <- sapply(split, FUN = select, value) %>% lapply(mean, na.rm = TRUE) %>% unlist()
-  stdevs <- sapply(split, FUN = select, value) %>% lapply(sd, na.rm = TRUE) %>% unlist()
+  means <- sapply(split, FUN = dplyr::select, value) %>% lapply(mean, na.rm = TRUE) %>% unlist()
+  stdevs <- sapply(split, FUN = dplyr::select, value) %>% lapply(sd, na.rm = TRUE) %>% unlist()
   
   summary <- data.frame(class.month.variable.value = names(means), 
                               mean = means, stdev = stdevs)
@@ -152,35 +152,47 @@ get_scatterplot <- function(data_frame, data_name, year, ymax) {
 }
 
 get_summary_scatterplot <- function(data_frame, data_name, year, ymax) {
+  data_frame$month <- factor(data_frame$month, levels = c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"))
+  levels(data_frame$month) <- c("January", "February", "March", "April", "May", "June", 
+                 "July", "August", "September", "October", "November", "December")
+  data_frame$class <- as.factor(data_frame$class)
+  levels(data_frame$class) <- c("Single cropped soy", "Double cropped soy", "Non-soy agriculture")
+  print(levels(data_frame$class))
+  
   plot <- ggplot(data = data_frame, aes(x = band_id, y = mean, col = class, pch = class)) +
-                geom_point(alpha = 0.8) +
-                geom_errorbar(data = data_frame, aes(x = band_id, ymin = mean - stdev, ymax = mean + stdev)) +
+                geom_point(alpha = 0.8,
+                              position = position_dodge(width = 0.5)) +
+                geom_errorbar(data = data_frame, aes(x = band_id, ymin = mean - stdev, ymax = mean + stdev),
+                              position = position_dodge(width = 0.5)) +
                 facet_wrap(~month) +
                 ggtitle(paste(data_name, "summary for year", year)) +
                 xlab("MODIS band") + ylab("reflectance") +
-                  coord_cartesian(ylim = c(0, ymax))
+                  coord_cartesian(ylim = c(0, ymax)) +
+                theme_bw()
   return(plot)
 }
 
 get_summary_scatterplot_indices <- function(data_frame, data_name, year, ymax) {
+
   plot <- ggplot(data = data_frame, aes(x = index, y = mean, col = class, pch = class)) +
                 geom_point(alpha = 0.8) +
                 geom_errorbar(data = data_frame, aes(x = index, ymin = mean - stdev, ymax = mean + stdev)) +
                 facet_wrap(~month) +
                 ggtitle(paste(data_name, "summary for year", year)) +
                 xlab("Vegetation Index") + ylab("index value") +
-                  coord_cartesian(ylim = c(0, ymax))
+                  coord_cartesian(ylim = c(0, ymax)) +
+                theme_bw()
   return(plot)
 }
 
 #print(get_scatterplot(agsat_tidy, "agsat", year, 7000))
 #print(get_scatterplot(plos_tidy, "plos", year, 7000))
-#print(get_summary_scatterplot(agsat_summary,"agsat", year, 7000))
-#print(get_summary_scatterplot(plos_summary, "plos", year, 7000))
+print(get_summary_scatterplot(agsat_summary,"agsat", year, 7000))
+print(get_summary_scatterplot(plos_summary, "plos", year, 7000))
 #print(get_summary_scatterplot(agsat_summary,"agsat", year, 2000))
 #print(get_summary_scatterplot(plos_summary, "plos", year, 2000))
-print(get_summary_scatterplot_indices(agsat_summary_indices,"agsat", year, 10))
-print(get_summary_scatterplot_indices(plos_summary_indices, "plos", year, 10))
+#print(get_summary_scatterplot_indices(agsat_summary_indices,"agsat", year, 10))
+#print(get_summary_scatterplot_indices(plos_summary_indices, "plos", year, 10))
 
 ```
 
