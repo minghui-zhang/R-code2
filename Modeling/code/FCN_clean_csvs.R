@@ -347,6 +347,28 @@ categorize_vars_CARpoly_tidy <- function(CARpoly_tidy) {
   return(CARpoly_tidy)
 }
 
+categorize_vars_CARpoly_tidy2 <- function(CARpoly_tidy) {
+  CARpoly_onset_cutoffs = quantile(CARpoly_tidy$onset, c(0,1/3,2/3,1), na.rm = TRUE)
+  CARpoly_onset_cutoffs[1] = CARpoly_onset_cutoffs[1]-1
+  
+  print('still okay 1')
+  regions <- character(length = length(CARpoly_tidy$latitude))
+  
+  regions[CARpoly_tidy$latitude < -15] <- "south"
+  regions[CARpoly_tidy$latitude >= -15 & CARpoly_tidy$longitude < -56.5] <- "west"
+  regions[CARpoly_tidy$latitude >= -15 & CARpoly_tidy$longitude >= -56.5 & CARpoly_tidy$longitude < -53.2] <- "central"
+  regions[CARpoly_tidy$latitude >= -15 & CARpoly_tidy$longitude >= -53.2] <- "east"
+  print(colnames(CARpoly_tidy))
+  CARpoly_tidy$region <- regions
+
+
+  
+  CARpoly_tidy <- CARpoly_tidy %>% mutate(onset_category=cut(onset, breaks = CARpoly_onset_cutoffs, 
+                                                             labels=c("early_onset","middle_onset","late_onset")))
+  
+  return(CARpoly_tidy)
+}
+
 categorize_vars_CARpoly_untidy <- function(median_CARpoly) {
   CARpoly_onset_cutoffs = quantile(median_CARpoly$onset, c(0,1/3,2/3,1), na.rm = TRUE)
   CARpoly_onset_cutoffs[1] = CARpoly_onset_cutoffs[1]-1
@@ -400,7 +422,7 @@ rename_cols_median_CARpoly <- function(median_CARpoly_raw) {
       latitude = latitude_median,
       longitude = longitude_median,
       onset = onset_median,
-      onset_historicalRange = onset_historicalRange_median,
+      #onset_historicalRange = onset_historicalRange_median,
       double_area_km2 = double_area_km2_sum,
       single_area_km2 = single_area_km2_sum,
       total_planted_area_km2 = total_planted_area_km2_sum,
@@ -470,6 +492,19 @@ rename_cols_percentile95_CARpoly <- function(percentile95_CARpoly_raw) {
   return(output)
 }
 
+rename_cols_percentile95_CARpoly2 <- function(percentile95_CARpoly_raw) {
+  output = percentile95_CARpoly_raw %>%
+    rename(
+      double_harvest_percentile95 = double_harvest,
+      double_plant_percentile95 = double_plant,
+      single_harvest_percentile95 = single_harvest,
+      single_plant_percentile95 = single_plant
+    ) %>%
+    filter(year > 0)
+  
+  return(output)
+}
+
 create_CARpoly_raw <- function(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw) {
   # join as single dataset and rename
   CARpoly_raw <- cbind(median_CARpoly_raw, 
@@ -501,6 +536,29 @@ create_CARpoly_raw <- function(median_CARpoly_raw, percentile5_CARpoly_raw, perc
   colnames(CARpoly_raw)[colnames(CARpoly_raw)=="percentile95_CARpoly_raw$double_harvest_percentile95"] <- "double_harvest_percentile95"
   colnames(CARpoly_raw)[colnames(CARpoly_raw)=="percentile95_CARpoly_raw$double_plant_percentile95"] <- "double_plant_percentile95"
   
+  return(CARpoly_raw)
+}
+
+create_CARpoly_raw2 <- function(median_CARpoly_raw, percentile5_CARpoly_raw, percentile95_CARpoly_raw) {
+  # join as single dataset and rename
+  CARpoly_raw <- cbind(median_CARpoly_raw$latitude_median, median_CARpoly_raw$longitude_median, 
+                       median_CARpoly_raw$onset_median, median_CARpoly_raw$year_median,
+                       percentile5_CARpoly_raw$double_harvest_percentile5,
+                       percentile5_CARpoly_raw$double_plant_percentile5,
+                       percentile95_CARpoly_raw$double_harvest_percentile95,
+                       percentile95_CARpoly_raw$double_plant_percentile95,
+                       
+                       percentile5_CARpoly_raw$single_harvest_percentile5,
+                       percentile5_CARpoly_raw$single_plant_percentile5,
+                       percentile95_CARpoly_raw$single_harvest_percentile95,
+                       percentile95_CARpoly_raw$single_plant_percentile95)
+
+  CARpoly_raw <- data.frame(CARpoly_raw)
+  names(CARpoly_raw) <- c("latitude", "longitude", "onset", "year",
+                          "single_harvest_percentile5", "single_plant_percentile5", 
+                          "single_harvest_percentile95", "single_plant_percentile95",
+                          "double_harvest_percentile5", "double_plant_percentile5",
+                          "double_harvest_percentile95", "double_plant_percentile95")
   return(CARpoly_raw)
 }
 
@@ -592,6 +650,54 @@ tidy_CARpoly <- function(CARpoly) {
   colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="CARpoly_delay_percentile95$delay_percentile95"] <- "delay_percentile95"
   colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="CARpoly_harvest_percentile95$harvest_percentile95"] <- "harvest_percentile95"
   colnames(CARpoly_tidy)[colnames(CARpoly_tidy)=="CARpoly_plant_percentile95$plant_percentile95"] <- "plant_percentile95"
+  
+  return(CARpoly_tidy)
+}
+
+tidy_CARpoly2 <- function(CARpoly) {
+  
+  # percentile5
+  CARpoly_harvest_percentile5 <- CARpoly %>% 
+    gather("double_harvest_percentile5", "single_harvest_percentile5", key = "intensity", value = "harvest_percentile5") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "double_harvest_percentile5", replacement = "DC") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "single_harvest_percentile5", replacement = "SC")
+  
+  CARpoly_plant_percentile5 <- CARpoly %>% 
+    gather("double_plant_percentile5", "single_plant_percentile5", key = "intensity", value = "plant_percentile5") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "double_plant_percentile5", replacement = "DC") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "single_plant_percentile5", replacement = "SC")
+  
+  # percentile95
+  CARpoly_harvest_percentile95 <- CARpoly %>% 
+    gather("double_harvest_percentile95", "single_harvest_percentile95", key = "intensity", value = "harvest_percentile95") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "double_harvest_percentile95", replacement = "DC") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "single_harvest_percentile95", replacement = "SC")
+  
+  CARpoly_plant_percentile95 <- CARpoly %>% 
+    gather("double_plant_percentile95", "single_plant_percentile95", key = "intensity", value = "plant_percentile95") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "double_plant_percentile95", replacement = "DC") %>%
+    mutate_if(is.character, 
+              str_replace_all, pattern = "single_plant_percentile95", replacement = "SC")
+  
+  # combine and rename
+  
+  CARpoly_tidy <- cbind(CARpoly_harvest_percentile5$latitude, CARpoly_harvest_percentile5$longitude, 
+                        CARpoly_harvest_percentile5$onset, CARpoly_harvest_percentile5$year,
+                        CARpoly_harvest_percentile5$harvest_percentile5,
+                        CARpoly_plant_percentile5$plant_percentile5,
+                        CARpoly_harvest_percentile95$harvest_percentile95,
+                        CARpoly_plant_percentile95$plant_percentile95)
+  CARpoly_tidy <- data.frame(CARpoly_tidy)
+  
+  names(CARpoly_tidy) <- c("latitude", "longitude", "onset", "year",
+                           "harvest_percentile5", "plant_percentile5", "harvest_percentile95", "plant_percentile95")
   
   return(CARpoly_tidy)
 }
