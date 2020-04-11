@@ -22,6 +22,7 @@ library(spatial)
 library(spdep)
 library(plm)
 library(stringr)
+library(fmsb) # calculate percentile
 
 os_system <- 'windows' # mac for laptop or windows for desktop
 if (os_system == 'windows') {first_folder <- 'E:'}
@@ -130,6 +131,141 @@ cell_df[which(cell_df[,"plant_stat_type"] == "median"), "plant_stat_type"] <- "p
 cell_sf_tidy$percentile <- cell_df$plant_stat_type
 ```
 
+## plot of onset, demise predictions
+
+```{r}
+
+library(tidyr)
+nw_predictions <- read.csv(paste0(first_folder,'/R-code2/ModelingPaper/northwest_MT_prediction_csv.csv'))
+ne_predictions <- read.csv(paste0(first_folder,'/R-code2/ModelingPaper/northeast_MT_prediction_csv.csv'))
+
+# CHANGE ONSET AND DEMISE from days after July 1 (the input) to days after Aug 1
+nw_predictions$outoday <- nw_predictions$outoday - 31
+nw_predictions$outeday <- nw_predictions$outeday - 31
+ne_predictions$outoday <- ne_predictions$outoday - 31
+ne_predictions$outeday <- ne_predictions$outeday - 31
+
+nw_predictions_tidy <- nw_predictions %>% 
+  rename(onset = outoday, demise = outeday) %>%
+  gather("wet_season_metric", "day", 2:3)
+
+ne_predictions_tidy <- ne_predictions %>% 
+  rename(onset = outoday, demise = outeday) %>%
+  gather("wet_season_metric", "day", 2:3)
+
+nw_predictions <- nw_predictions %>% 
+  rename(onset = outoday, demise = outeday, length = outslen)
+
+ne_predictions <- ne_predictions %>% 
+  rename(onset = outoday, demise = outeday, length = outslen)
+
+nw_onset_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'onset'])
+nw_onset_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'onset'])
+nw_demise_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'demise'])
+nw_demise_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'demise'])
+nw_length_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'length'])
+nw_length_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'length'])
+
+ne_onset_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'onset'])
+ne_onset_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'onset'])
+ne_demise_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'demise'])
+ne_demise_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'demise'])
+ne_length_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'length'])
+ne_length_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'length'])
+
+# plot onset and demise
+ggplot(nw_predictions_tidy) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=50, ymax=400), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = day, color = wet_season_metric)) +
+  geom_segment(aes(x = 1970, y = nw_onset_mean_before, xend = 2000, yend = nw_onset_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 1970, y = nw_demise_mean_before, xend = 2000, yend = nw_demise_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = nw_onset_mean_after, xend = 2049, yend = nw_onset_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = nw_demise_mean_after, xend = 2049, yend = nw_demise_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  ggtitle('Predictions for northwest Mato Grosso') +
+  ylab('Days after Aug 1') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 375, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 375, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+ggplot(ne_predictions_tidy) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=50, ymax=400), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = day, color = wet_season_metric)) +
+  geom_segment(aes(x = 1970, y = ne_onset_mean_before, xend = 2000, yend = ne_onset_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 1970, y = ne_demise_mean_before, xend = 2000, yend = ne_demise_mean_before), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = ne_onset_mean_after, xend = 2049, yend = ne_onset_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = ne_demise_mean_after, xend = 2049, yend = ne_demise_mean_after), 
+               col = 'black', size = 1, linetype = 'dashed') +
+  ggtitle('Predictions for northeast Mato Grosso') +
+  ylab('Days after Aug 1') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 375, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 375, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+# plot wet season length
+ggplot(nw_predictions) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=150, ymax=320), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = length)) +
+  geom_segment(aes(x = 1970, y = nw_length_mean_before, xend = 2000, yend = nw_length_mean_before), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = nw_length_mean_after, xend = 2049, yend = nw_length_mean_after), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_hline(yintercept = 200, color = 'red') +
+  ggtitle('Predictions for northwest Mato Grosso') +
+  ylab('Wet season length') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 300, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+ggplot(ne_predictions) +
+  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=150, ymax=320), fill="lightgray", alpha=0.1) +
+  geom_line(aes(x = time, y = length)) +
+  geom_segment(aes(x = 1970, y = ne_length_mean_before, xend = 2000, yend = ne_length_mean_before), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_segment(aes(x = 2020, y = ne_length_mean_after, xend = 2049, yend = ne_length_mean_after), 
+               col = 'blue', size = 1, linetype = 'dashed') +
+  geom_hline(yintercept = 200, color = 'red') +
+  ggtitle('Predictions for northeast Mato Grosso') +
+  ylab('Wet season length') +
+  xlab('Year') +
+  geom_text(aes(x = 1985, y = 300, label = "Historical"), color = "black", size = 5) +
+  geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
+  theme_bw()
+
+# calculate change in onset in 2020- 2049 relative to 1970 - 2000 for likelihood calculations
+delta_onset_ne_predictions <- ne_predictions
+delta_onset_ne_predictions$delta_onset <- delta_onset_ne_predictions$onset - ne_onset_mean_before
+delta_onset_ne_predictions$region <- 'vulnerable'
+delta_onset_ne_predictions <- delta_onset_ne_predictions %>% dplyr::filter(time >= 2020) 
+# calculate percentile of delta_onset after filtering only the future years
+delta_onset_ne_predictions$delta_onset_percentile <- percentile(delta_onset_ne_predictions$delta_onset)
+delta_onset_ne_predictions <- delta_onset_ne_predictions %>%
+  dplyr::select(c('time', 'delta_onset', 'delta_onset_percentile', 'onset', 'demise', 'length', 'region')) %>%
+  dplyr::rename(year = time)
+
+delta_onset_nw_predictions <- nw_predictions
+delta_onset_nw_predictions$delta_onset <- delta_onset_nw_predictions$onset - nw_onset_mean_before
+delta_onset_nw_predictions$region <- 'not_vulnerable'
+delta_onset_nw_predictions <- delta_onset_nw_predictions %>% dplyr::filter(time >= 2020) 
+# calculate percentile of delta_onset after filtering only the future years
+delta_onset_nw_predictions$delta_onset_percentile <- percentile(delta_onset_nw_predictions$delta_onset)
+delta_onset_nw_predictions <- delta_onset_nw_predictions %>%
+  dplyr::select(c('time', 'delta_onset', 'delta_onset_percentile', 'onset', 'demise', 'length', 'region')) %>%
+  dplyr::rename(year = time)
+
+delta_onset_predictions <- rbind(delta_onset_ne_predictions, delta_onset_nw_predictions)
+```
+
+
 Given a year and region, plot planting date CDF and make predictions from it
 
 ```{r}
@@ -141,7 +277,6 @@ year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 case_name <- 'earlyOn_lateDem' # lateOn_earlyDem, medOn_medDem, earlyOn_lateDem
 
 # WORST CASE
-
 
 if (case_name == 'lateOn_earlyDem') {
   onset_change_vulnerable <- 20.92
@@ -200,7 +335,15 @@ predictions_summary <- data.frame(intensity = character(0),
                                   # percent of people who won't be able to do DC (or SC) due to earlier demise
                                   percent_affected_early_demise = numeric(0),
                                   # available days to plant the given intensity
-                                  window = numeric(0))
+                                  window = numeric(0),
+                                  # the change in onset, compared to 2014, that must happen to have onset touch the 5th percentile of predicted plant
+                                  delta_onset_touching5thpercentile = numeric(0),
+                                  # ... and the likelihood of this change in onset (or worse) happening
+                                  delta_onset_likelihood_touching5thpercentile = numeric(0),
+                                  # the change in onset, compared to 2014, that must happen to have onset touch the 50th percentile of predicted plant
+                                  delta_onset_touching50thpercentile = numeric(0),
+                                  # ... and the likelihood of this change in onset (or worse) happening
+                                  delta_onset_likelihood_touching50thpercentile = numeric(0))
 
 for (intensity in c('SC', 'DC')) {
   for (region in c('vulnerable', 'not_vulnerable')) {
@@ -226,9 +369,7 @@ for (intensity in c('SC', 'DC')) {
     pred_onset <- obs_onset + onset_change
     obs_demise <- mean(cell_df_subset$demise)
     pred_demise <- obs_demise + demise_change
-    
 
-    
     # calculate latest planting date based on cropping intensity
     if (intensity == 'SC') {
       pred_latest_plant <- pred_demise + 30 - SC_cycle_length # assume use 20 days of soil moisture and 10 days for grain drying
@@ -321,9 +462,50 @@ for (intensity in c('SC', 'DC')) {
         # # change in percent of people who won't be able to do DC
         # percent_affected_early_demise <- pred_percent_affected - obs_percent_affected
         
-        percent_affected_early_demise <- 100 - approx(c(percentile5_pred, percentile25_pred, percentile50_pred, percentile75_pred, percentile95_pred), 
+        percent_affected_early_demise <- 100 - approx(c(percentile5_pred, percentile25_pred, percentile50_pred, 
+                                                        percentile75_pred, percentile95_pred), 
                                             c(5, 25, 50, 75, 95), xout = pred_latest_plant)$y
       }
+      
+      # max change in onset needed for 5th and 50th percentile planting to touch onset, and the likelihood of that onset value
+      # interpolate to find likelihood of the delta_onset. NOTE, took 100 - percentile to get likelihood of onset touching 5th percentile plant OR WORSE
+      # because some of obs planting 'can't do DC', didn't find max change in demise needed for 95th percentile planting to no longer be able to do DC
+      coef_onset_5thpercentile <- coefs_onset_oi[coefs_onset_oi$intensity == intensity & coefs_onset_oi$percentile == "percentile5", "onset_coef"]
+      coef_year_5thpercentile <- coefs_onset_oi[coefs_onset_oi$intensity == intensity & coefs_onset_oi$percentile == "percentile5", "year_coef"]
+      coef_onset_50thpercentile <- coefs_onset_oi[coefs_onset_oi$intensity == intensity & coefs_onset_oi$percentile == "percentile50", "onset_coef"]
+      coef_year_50thpercentile <- coefs_onset_oi[coefs_onset_oi$intensity == intensity & coefs_onset_oi$percentile == "percentile50", "year_coef"]
+
+      if (pred_type == 'pred_onset_change') {
+        delta_onset_touching5thpercentile <- (percentile5_obs - coef_onset_5thpercentile*obs_onset)/(1 - coef_onset_5thpercentile) - obs_onset
+        delta_onset_touching50thpercentile <- (percentile50_obs - coef_onset_50thpercentile*obs_onset)/(1 - coef_onset_50thpercentile) - obs_onset
+        
+        delta_onset_likelihood_touching5thpercentile <- 100 - 
+                                              approx(x = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset'],
+                                               y = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset_percentile'], 
+                                               xout = delta_onset_touching5thpercentile)$y
+        
+        delta_onset_likelihood_touching50thpercentile <- 100 - 
+                                              approx(x = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset'],
+                                               y = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset_percentile'], 
+                                               xout = delta_onset_touching50thpercentile)$y
+      }
+      if (pred_type == 'pred_onset_year_change') {
+        delta_onset_touching5thpercentile <- (percentile5_obs - coef_onset_5thpercentile*obs_onset + 
+                                                        coef_year_5thpercentile*10)/(1 - coef_onset_5thpercentile) - obs_onset
+        delta_onset_touching50thpercentile <- (percentile50_obs - coef_onset_50thpercentile*obs_onset + 
+                                                        coef_year_50thpercentile*10)/(1 - coef_onset_50thpercentile) - obs_onset
+        
+        delta_onset_likelihood_touching5thpercentile <- 100 - 
+                                               approx(x = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset'],
+                                               y = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset_percentile'], 
+                                               xout = delta_onset_touching5thpercentile)$y
+        
+        delta_onset_likelihood_touching50thpercentile <- 100 - 
+                                               approx(x = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset'],
+                                               y = delta_onset_predictions[delta_onset_predictions$region == region, 'delta_onset_percentile'], 
+                                               xout = delta_onset_touching50thpercentile)$y
+      }
+      
       
       predictions_summary <- rbind(predictions_summary, 
                                    data.frame(intensity = intensity,
@@ -332,7 +514,12 @@ for (intensity in c('SC', 'DC')) {
                                               change_plant = area,
                                               percent_affect_late_onset = percent_affect_late_onset, 
                                               percent_affected_early_demise = percent_affected_early_demise,
-                                              window = window))
+                                              window = window,
+                                              delta_onset_touching5thpercentile = delta_onset_touching5thpercentile,
+                                              delta_onset_likelihood_touching5thpercentile = delta_onset_likelihood_touching5thpercentile,
+                                              delta_onset_touching50thpercentile = delta_onset_touching50thpercentile,
+                                              delta_onset_likelihood_touching50thpercentile = delta_onset_likelihood_touching50thpercentile
+                                              ))
       
     }
 
@@ -508,6 +695,26 @@ plant_window_predicted <- data.frame(case = c('worst', 'worst', 'medium', 'mediu
 plant_window_predicted$yID<- with(plant_window_predicted, paste0(case, intensity))
 plant_window_predicted$xID<- with(plant_window_predicted, paste0(region))
 
+delta_onset_touching5thpercentile_predicted <- data.frame(
+                          intensity = c('SC', 'DC', 'SC', 'DC', 
+                                        'SC', 'DC', 'SC', 'DC'), 
+                          region = c('east', 'east', 'east', 'east',
+                                     'west', 'west', 'west', 'west'),
+                          trend = c('yes', 'yes', 'no', 'no', 'yes', 'yes', 'no', 'no'),
+                          value = c(-3.93, -6.66, 25.18, 20.02, -11.88, -12.02, 17.22, 14.66))
+delta_onset_touching5thpercentile_predicted$yID<- delta_onset_touching5thpercentile_predicted$intensity
+delta_onset_touching5thpercentile_predicted$xID<- with(delta_onset_touching5thpercentile_predicted, paste0(region, trend))
+
+delta_onset_likelihood_predicted <- data.frame(
+                          intensity = c('SC', 'DC', 'SC', 'DC', 
+                                        'SC', 'DC', 'SC', 'DC'), 
+                          region = c('east', 'east', 'east', 'east',
+                                     'west', 'west', 'west', 'west'),
+                          trend = c('yes', 'yes', 'no', 'no', 'yes', 'yes', 'no', 'no'),
+                          value = c(82.15, 86.92, 0.13, 8.19, 100, 100, 0, 6.22))
+delta_onset_likelihood_predicted$yID<- delta_onset_likelihood_predicted$intensity
+delta_onset_likelihood_predicted$xID<- with(delta_onset_likelihood_predicted, paste0(region, trend))
+
 ggplot(data = plant_delay_days_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
   geom_text(aes(label = round(plant_delay_days_predicted$value, 1))) + # write the values
@@ -536,118 +743,21 @@ ggplot(data = plant_window_predicted, mapping = aes(x = xID, y = yID, fill = val
   ggtitle("Planting window in average 25km cell") +
   theme_bw()
 
-```
-
-## plot of onset, demise predictions
-
-```{r}
-
-library(tidyr)
-nw_predictions <- read.csv(paste0(first_folder,'/R-code2/ModelingPaper/northwest_MT_prediction_csv.csv'))
-ne_predictions <- read.csv(paste0(first_folder,'/R-code2/ModelingPaper/northeast_MT_prediction_csv.csv'))
-
-# CHANGE ONSET AND DEMISE from days after July 1 (the input) to days after Aug 1
-nw_predictions$outoday <- nw_predictions$outoday - 31
-nw_predictions$outeday <- nw_predictions$outeday - 31
-ne_predictions$outoday <- ne_predictions$outoday - 31
-ne_predictions$outeday <- ne_predictions$outeday - 31
-
-nw_predictions_tidy <- nw_predictions %>% 
-  rename(onset = outoday, demise = outeday) %>%
-  gather("wet_season_metric", "day", 2:3)
-
-ne_predictions_tidy <- ne_predictions %>% 
-  rename(onset = outoday, demise = outeday) %>%
-  gather("wet_season_metric", "day", 2:3)
-
-nw_predictions <- nw_predictions %>% 
-  rename(onset = outoday, demise = outeday, length = outslen)
-
-ne_predictions <- ne_predictions %>% 
-  rename(onset = outoday, demise = outeday, length = outslen)
-
-nw_onset_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'onset'])
-nw_onset_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'onset'])
-nw_demise_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'demise'])
-nw_demise_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'demise'])
-nw_length_mean_before <- mean(nw_predictions[nw_predictions$time <= 2000, 'length'])
-nw_length_mean_after <- mean(nw_predictions[nw_predictions$time >= 2020, 'length'])
-
-ne_onset_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'onset'])
-ne_onset_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'onset'])
-ne_demise_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'demise'])
-ne_demise_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'demise'])
-ne_length_mean_before <- mean(ne_predictions[ne_predictions$time <= 2000, 'length'])
-ne_length_mean_after <- mean(ne_predictions[ne_predictions$time >= 2020, 'length'])
-
-# plot onset and demise
-ggplot(nw_predictions_tidy) +
-  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=50, ymax=400), fill="lightgray", alpha=0.1) +
-  geom_line(aes(x = time, y = day, color = wet_season_metric)) +
-  geom_segment(aes(x = 1970, y = nw_onset_mean_before, xend = 2000, yend = nw_onset_mean_before), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 1970, y = nw_demise_mean_before, xend = 2000, yend = nw_demise_mean_before), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 2020, y = nw_onset_mean_after, xend = 2049, yend = nw_onset_mean_after), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 2020, y = nw_demise_mean_after, xend = 2049, yend = nw_demise_mean_after), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  ggtitle('Predictions for northwest Mato Grosso') +
-  ylab('Days after Aug 1') +
-  xlab('Year') +
-  geom_text(aes(x = 1985, y = 375, label = "Historical"), color = "black", size = 5) +
-  geom_text(aes(x = 2035, y = 375, label = "Predictions"), color = "black", size = 5) +
+ggplot(data = delta_onset_touching5thpercentile_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(delta_onset_touching5thpercentile_predicted$value, 1))) + # write the values
+  scale_fill_gradient2(name = "Days", low = "red", high = "blue", midpoint = 0) +
+  ggtitle("Onset change at which planting dates experience hard limit [days]") +
   theme_bw()
 
-ggplot(ne_predictions_tidy) +
-  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=50, ymax=400), fill="lightgray", alpha=0.1) +
-  geom_line(aes(x = time, y = day, color = wet_season_metric)) +
-  geom_segment(aes(x = 1970, y = ne_onset_mean_before, xend = 2000, yend = ne_onset_mean_before), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 1970, y = ne_demise_mean_before, xend = 2000, yend = ne_demise_mean_before), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 2020, y = ne_onset_mean_after, xend = 2049, yend = ne_onset_mean_after), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 2020, y = ne_demise_mean_after, xend = 2049, yend = ne_demise_mean_after), 
-               col = 'black', size = 1, linetype = 'dashed') +
-  ggtitle('Predictions for northeast Mato Grosso') +
-  ylab('Days after Aug 1') +
-  xlab('Year') +
-  geom_text(aes(x = 1985, y = 375, label = "Historical"), color = "black", size = 5) +
-  geom_text(aes(x = 2035, y = 375, label = "Predictions"), color = "black", size = 5) +
-  theme_bw()
-
-# plot wet season length
-ggplot(nw_predictions) +
-  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=150, ymax=320), fill="lightgray", alpha=0.1) +
-  geom_line(aes(x = time, y = length)) +
-  geom_segment(aes(x = 1970, y = nw_length_mean_before, xend = 2000, yend = nw_length_mean_before), 
-               col = 'blue', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 2020, y = nw_length_mean_after, xend = 2049, yend = nw_length_mean_after), 
-               col = 'blue', size = 1, linetype = 'dashed') +
-  geom_hline(yintercept = 200, color = 'red') +
-  ggtitle('Predictions for northwest Mato Grosso') +
-  ylab('Wet season length') +
-  xlab('Year') +
-  geom_text(aes(x = 1985, y = 300, label = "Historical"), color = "black", size = 5) +
-  geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
-  theme_bw()
-
-ggplot(ne_predictions) +
-  geom_rect(mapping=aes(xmin=2000, xmax=2020, ymin=150, ymax=320), fill="lightgray", alpha=0.1) +
-  geom_line(aes(x = time, y = length)) +
-  geom_segment(aes(x = 1970, y = ne_length_mean_before, xend = 2000, yend = ne_length_mean_before), 
-               col = 'blue', size = 1, linetype = 'dashed') +
-  geom_segment(aes(x = 2020, y = ne_length_mean_after, xend = 2049, yend = ne_length_mean_after), 
-               col = 'blue', size = 1, linetype = 'dashed') +
-  geom_hline(yintercept = 200, color = 'red') +
-  ggtitle('Predictions for northeast Mato Grosso') +
-  ylab('Wet season length') +
-  xlab('Year') +
-  geom_text(aes(x = 1985, y = 300, label = "Historical"), color = "black", size = 5) +
-  geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
+ggplot(data = delta_onset_likelihood_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1))) + # write the values
+  scale_fill_gradient(name = "Days", low = "white", high = "red") +
+  ggtitle("Probability that onset will become hard limit for planting [%]") +
   theme_bw()
 ```
+
 
 # correlation between onset and demise
 ```{r}

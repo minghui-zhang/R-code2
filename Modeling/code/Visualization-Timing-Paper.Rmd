@@ -175,7 +175,7 @@ plot_cell_plant <- function(year, cell_data, intensity) {
   
   ggplot(cell_year) +
    geom_sf(aes(fill = plant), colour = NA) +
-   scale_fill_viridis(limits = c(50, 250)) +
+   scale_fill_viridis(limits = c(50, 150)) +
    ggtitle(paste(intensity, "plant", year)) +
    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
    theme_bw() +
@@ -192,7 +192,7 @@ plot_cell_harvest <- function(year, cell_data, intensity) {
   
   ggplot(cell_year) +
    geom_sf(aes(fill = harvest), colour = NA) +
-   scale_fill_viridis(limits = c(50, 250)) +
+   scale_fill_viridis(limits = c(150, 250)) +
    ggtitle(paste(intensity, "harvest", year)) +
    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
    theme_bw() +
