@@ -45,6 +45,7 @@ ggplot(timing_doubleFirst, aes(x = timing_doubleFirst$DOY, y = timing_doubleFirs
   geom_segment(data = onset_data, aes(x = median_onset, y = year, group = year, xend = median_onset, yend = year + 0.9, height = rep(100, 11), fill = median_onset), color = "red", size = 1) +
   geom_segment(data = median_plant_doubleFirst, aes(x = median_plant, y = year, group = year, xend = median_plant, yend = year + 0.9, height = rep(100, 11), fill = median_plant), color = "black", size = 1) +
   geom_segment(data = median_harvest_doubleFirst, aes(x = median_harvest, y = year, group = year, xend = median_harvest, yend = year + 0.9, height = rep(100, 11), fill = median_harvest), color = "black", size = 1) +
+  geom_segment(aes(x = 45, xend = 45, y = 2004, yend = 2015), color = "darkgray", size = 1) + #Sept 15 sanitary break
   theme_bw()
 
 # Onset minus plant
@@ -86,6 +87,7 @@ ggplot(timing_single, aes(x = timing_single$DOY, y = timing_single$Year, height 
   geom_segment(data = onset_data, aes(x = median_onset, y = year, group = year, xend = median_onset, yend = year + 0.9, height = rep(100, 11), fill = median_onset), color = "red", size = 1) +
     geom_segment(data = median_plant_single, aes(x = median_plant, y = year, group = year, xend = median_plant, yend = year + 0.9, height = rep(100, 11), fill = median_plant), color = "black", size = 1) +
     geom_segment(data = median_harvest_single, aes(x = median_harvest, y = year, group = year, xend = median_harvest, yend = year + 0.9, height = rep(100, 11), fill = median_harvest), color = "black", size = 1) +
+  geom_segment(aes(x = 45, xend = 45, y = 2004, yend = 2015), color = "darkgray", size = 1) + #Sept 15 sanitary break
   scale_y_continuous(breaks=seq(2004, 2014, 1)) +
   theme_bw()
 

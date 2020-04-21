@@ -165,7 +165,7 @@ cell_sf_tidy_harvest$year_index <- cell_sf_tidy_harvest$year - 2003
 
 ```{r}
 
-year_oi <- 2014
+year_oi <- 2010
 
 cell_sf_tidy_plant <- cell_sf_tidy_plant %>% drop_na()
 cell_sf_tidy_harvest <- cell_sf_tidy_harvest %>% drop_na()
