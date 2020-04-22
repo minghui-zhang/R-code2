@@ -538,7 +538,7 @@ READ AN INDIVIDUAL ONSET FOR MAPPING
 ```{r}
 
 # import data for onset_oi
-onset_oi <- 'freq_8_chirps_ATchirps5km' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann' # 'rangethres_10_15_20_30_persiann'
+onset_oi <- 'AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann' # 'rangethres_10_15_20_30_persiann'
 onset_baseline <- 'AA_25_persiann' # to compare to onset_oi in difference maps, etc 'AA_25_persiann'
 onset_third <- 'rangethres_10_15_20_30_persiann' # just to plot the timeseries
 
@@ -819,7 +819,7 @@ Map of within-year spatial variability (averaged quantiles through the years) fo
 
 # choose only one intensity and percentile for planting
 intensity <- 'DC'
-percentile <- 'percentile25'
+percentile <- 'median'
 
 onset_oi_data_subset <- onset_oi_data[onset_oi_data$intensity == intensity & 
                                         onset_oi_data$plant_stat_type == percentile,]
@@ -852,15 +852,28 @@ onset_oi_data_subset_cells <- onset_oi_data_subset[onset_oi_data_subset$cell_ID 
 onset_oi_summarized <- onset_oi_data_subset_cells %>% group_by(cell_ID) %>%
                                              summarize(onset_quantile_median = median(onset_quantile_eachyear),
                                                    onset_quantile_mean = mean(onset_quantile_eachyear),
-                                                   plant_quantile_median = median(plant_quantile_eachyear)) %>%
+                                                   plant_quantile_median = median(plant_quantile_eachyear),
+                                                   onset_mean = mean(onset),
+                                                   plant_mean = mean(plant),
+                                                   delay_mean = plant_mean - onset_mean) %>%
                                              ungroup()
-
 onset_quantile_map_summary <- ggplot(onset_oi_summarized) +
       geom_sf(aes(fill = onset_quantile_median), color = NA) +
       #scale_fill_viridis() +
       scale_fill_gradient(low="black", high="blue") +
       #scale_fill_brewer(palette="YlOrRd") +
       ggtitle(paste("Median onset quantile, all years,", onset_oi)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", 
+                   alpha = 0, linetype = 1) +
+      theme_bw()
+
+# plot average onset (2004 - 2014)
+onset_map_summary <- ggplot(onset_oi_summarized) +
+      geom_sf(aes(fill = onset_mean), color = NA) +
+      scale_fill_viridis() +
+      #scale_fill_gradient(low="black", high="blue") +
+      #scale_fill_brewer(palette="YlOrRd") +
+      ggtitle(paste("Mean onset, all years,", onset_oi)) +
       geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", 
                    alpha = 0, linetype = 1) +
       theme_bw()
@@ -875,8 +888,22 @@ plant_quantile_map_summary <- ggplot(onset_oi_summarized) +
                    alpha = 0, linetype = 1) +
       theme_bw()
 
-print(onset_quantile_map_summary)
-print(plant_quantile_map_summary)
+# calculate average DC delay between planting and onset, 2004 - 2014
+delay_map_summary <- ggplot(onset_oi_summarized) +
+      geom_sf(aes(fill = delay_mean), color = NA) +
+      scale_fill_viridis(limits = c(0, 70)) +
+      #scale_fill_gradient(low="black", high="blue") +
+      #scale_fill_brewer(palette="YlOrRd") +
+      ggtitle(paste("Mean delay, all years,", onset_oi, intensity)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", 
+                   alpha = 0, linetype = 1) +
+      theme_bw()
+
+
+#print(onset_quantile_map_summary)
+#print(plant_quantile_map_summary)
+print(onset_map_summary)
+print(delay_map_summary)
 
 ```
 
