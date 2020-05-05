@@ -165,7 +165,7 @@ cell_sf_tidy_harvest$year_index <- cell_sf_tidy_harvest$year - 2003
 
 ```{r}
 
-year_oi <- 2010
+year_oi <- 2004
 
 cell_sf_tidy_plant <- cell_sf_tidy_plant %>% drop_na()
 cell_sf_tidy_harvest <- cell_sf_tidy_harvest %>% drop_na()
@@ -174,8 +174,10 @@ plot_cell_plant <- function(year, cell_data, intensity) {
   cell_year <- cell_data[cell_data$year == year, ]
   
   ggplot(cell_year) +
-   geom_sf(aes(fill = plant), colour = NA) +
-   scale_fill_viridis(limits = c(50, 150)) +
+   geom_sf(aes(fill = plant_category), colour = NA) +
+   #scale_fill_viridis(limits = c(50, 150)) +
+   #scale_fill_continuous(low = '#f7fcb9', high = '#31a354', na.value = 'white', space = "Lab", limits = c(50, 150)) +
+    scale_fill_brewer(type = 'seq', palette = 'YlGnBu') +
    ggtitle(paste(intensity, "plant", year)) +
    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
    theme_bw() +
@@ -187,12 +189,15 @@ plot_cell_plant <- function(year, cell_data, intensity) {
 
 }
 
+
 plot_cell_harvest <- function(year, cell_data, intensity) {
   cell_year <- cell_data[cell_data$year == year, ]
   
   ggplot(cell_year) +
-   geom_sf(aes(fill = harvest), colour = NA) +
-   scale_fill_viridis(limits = c(150, 250)) +
+   geom_sf(aes(fill = harvest_category), colour = NA) +
+   #scale_fill_viridis(limits = c(150, 250)) +
+   #scale_fill_continuous(low = '#fde0dd', high = '#c51b8a', na.value = 'white', space = "Lab", limits = c(150, 250)) +
+    scale_fill_brewer(type = 'seq', palette = 'YlOrRd') +
    ggtitle(paste(intensity, "harvest", year)) +
    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
    theme_bw() +
@@ -204,6 +209,15 @@ plot_cell_harvest <- function(year, cell_data, intensity) {
 
 }
 
+cell_sf_tidy_plant$plant_category <- cut(cell_sf_tidy_plant$plant, 
+                                         breaks = c(50, 75, 90, 105, 120, 135, 150),
+                                         labels = c('50 - 75', '75 - 90', '90 - 105', 
+                                                    '105 - 120', '120 - 135', '135 - 150'))
+cell_sf_tidy_harvest$harvest_category <- cut(cell_sf_tidy_harvest$harvest, 
+                                         breaks = c(150, 175, 190, 205, 220, 235, 250),
+                                         labels = c('150 - 175', '175 - 190', '190 - 205', 
+                                                    '205 - 220', '220 - 235', '235 - 250'))
+# create categories for plotting
 cell_sf_tidy_plant_DC <- cell_sf_tidy_plant[cell_sf_tidy_plant$intensity == "DC",] %>% 
                         filter(plant > 50)
 cell_sf_tidy_harvest_DC <- cell_sf_tidy_harvest[cell_sf_tidy_harvest$intensity == "DC",] %>% 
@@ -212,6 +226,7 @@ cell_sf_tidy_plant_SC <- cell_sf_tidy_plant[cell_sf_tidy_plant$intensity == "SC"
                         filter(plant > 50)
 cell_sf_tidy_harvest_SC <- cell_sf_tidy_harvest[cell_sf_tidy_harvest$intensity == "SC",] %>% 
                         filter(harvest < 250)
+
 
 print(plot_cell_plant(year_oi, cell_sf_tidy_plant_DC, "DC"))
 print(plot_cell_harvest(year_oi, cell_sf_tidy_harvest_DC, "DC"))
