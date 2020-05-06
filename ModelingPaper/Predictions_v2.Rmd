@@ -42,6 +42,8 @@ crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs8
 
 ```
 
+# Note: we use demise_AA_25_persiann because we use A!_2.5_persiann to make predictions
+
 ```{r}
 onset_oi <- 'demise_AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann'
 
@@ -274,7 +276,7 @@ year_oi <- 2014 # AVOID USING THIS FOR 2004 - 2014 AVERAGE
 
 # onset regions and change
 
-case_name <- 'earlyOn_lateDem' # lateOn_earlyDem, medOn_medDem, earlyOn_lateDem
+case_name <- 'lateOn_earlyDem' # lateOn_earlyDem, medOn_medDem, earlyOn_lateDem
 
 # WORST CASE
 
@@ -380,6 +382,8 @@ for (intensity in c('SC', 'DC')) {
       pred_latest_plant <- pred_demise + 30 - DC_cycle_length
       obs_latest_plant <- obs_demise + 30 - DC_cycle_length
     }
+    
+    print(paste('too late to plant:', pred_latest_plant))
   
     for (percentile in c('percentile5', 'percentile25', 'percentile50', 'percentile75', 'percentile95')) {
       
@@ -506,9 +510,9 @@ for (intensity in c('SC', 'DC')) {
                                                xout = delta_onset_touching50thpercentile)$y
       }
       
+      print(paste('intensity', intensity, 'region', region))
       
-      predictions_summary <- rbind(predictions_summary, 
-                                   data.frame(intensity = intensity,
+      new_predictions_summary_row <- data.frame(intensity = intensity,
                                               region = region,
                                               pred_type = pred_type,
                                               change_plant = area,
@@ -519,8 +523,10 @@ for (intensity in c('SC', 'DC')) {
                                               delta_onset_likelihood_touching5thpercentile = delta_onset_likelihood_touching5thpercentile,
                                               delta_onset_touching50thpercentile = delta_onset_touching50thpercentile,
                                               delta_onset_likelihood_touching50thpercentile = delta_onset_likelihood_touching50thpercentile
-                                              ))
+                                              )
       
+      predictions_summary <- rbind(predictions_summary, new_predictions_summary_row)
+
     }
 
     # set max x limit based on cropping intensity
@@ -553,23 +559,64 @@ for (intensity in c('SC', 'DC')) {
                                                    predictions_filtered$type != 'observed',],
                                   predictions[predictions$type == 'observed' ,])
     
+    # plotting aesthetics
+    transparency_onset_demise_lines <- 0.8
+    transparency_arrows <- 0.8
+    cdf_line_width <- 2
+    
+    # predictions plot (full)
     predictions_plot <- ggplot(predictions) +
-      geom_line(mapping = aes(x = plant, y = percentile, col = type), size = 1, alpha = 0.3) +
-      geom_line(data = predictions_filtered, mapping = aes(x = plant, y = percentile, col = type), size = 1) +
-      scale_color_manual(values=c("black", '#CC0000', '#006600')) +
+      geom_line(mapping = aes(x = plant, y = percentile, col = type), size = cdf_line_width, alpha = 0.3) + # more transparent
+      geom_line(data = predictions_filtered, mapping = aes(x = plant, y = percentile, col = type), size = cdf_line_width, alpha = 0.8) + # less transparent, for only between onset and too late to plant
+      scale_color_manual(values=c("black", '#EC7063', '#B9770E')) + # observed, no trend, trend cdf lines
       #geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
-      geom_vline(mapping = aes(xintercept = obs_onset), col = '#3498DB', size = 1, alpha = 0.5) +
-      geom_vline(mapping = aes(xintercept = pred_onset), col = '#3498DB', linetype = 'dashed',  size = 1, alpha = 0.5) +
-      geom_vline(mapping = aes(xintercept = obs_latest_plant), col = '#21618C',  size = 1, alpha = 0.5) +
-      geom_vline(mapping = aes(xintercept = pred_latest_plant), col = '#21618C', linetype = 'dashed', size = 1, alpha = 0.5) +
-      geom_segment(aes(x=obs_onset, xend=pred_onset, y=60, yend=60), size = 1, color = '#3498DB', alpha = 0.05, arrow = arrow()) +
-      geom_segment(aes(x=obs_latest_plant, xend=pred_latest_plant, y=40, yend=40), size = 1, color = '#21618C', alpha = 0.05, arrow = arrow()) +
+      geom_vline(mapping = aes(xintercept = obs_onset), col = '#3498DB', size = 1, alpha = transparency_onset_demise_lines) + # observed onset
+      geom_vline(mapping = aes(xintercept = pred_onset), col = '#3498DB', linetype = 'dashed',  
+                 size = 1, alpha = transparency_onset_demise_lines) + # predicted onset
+      geom_vline(mapping = aes(xintercept = obs_latest_plant), col = '#1B4F72',  size = 1, alpha = transparency_onset_demise_lines) + # observed latest plant
+      geom_vline(mapping = aes(xintercept = pred_latest_plant), col = '#1B4F72', linetype = 'dashed', 
+                 size = 1, alpha = transparency_onset_demise_lines) + # predicted latest plant
+      geom_segment(aes(x=obs_onset, xend=pred_onset, y=60, yend=60), size = 1, color = '#3498DB', alpha = transparency_arrows,
+                   arrow = arrow(type="closed",ends="last",length=unit(0.3,"cm"))) +
+      geom_segment(aes(x=obs_latest_plant, xend=pred_latest_plant, y=40, yend=40), size = 1, color = '#21618C', alpha = transparency_arrows,
+                   arrow = arrow(type="closed",ends="last",length=unit(0.3,"cm"))) +
       ggtitle(paste('Planting CDF',intensity, region, 'region', 'case', case_name)) +
-      xlab('DOY after Aug 1') +
-      xlim(30, max_xlim) +
-      theme_bw()
+      xlab('Days after Aug 1') + 
+      xlim(40, 130) + # full axis: 30 to max_xlim
+      theme_bw() +
+      theme(panel.grid = element_blank(), 
+            axis.text.x = element_text(face="bold", size=12), # size for subplot = 14, size for fullplot = 12
+            axis.text.y = element_text(face="bold", size=12),
+            axis.title = element_text(size=12)
+            )
+    
+    # predictions subplot (to show close-up of predicted cdfs)
+    predictions_subplot <- ggplot(predictions) +
+      geom_line(mapping = aes(x = plant, y = percentile, col = type), size = cdf_line_width, alpha = 0.3) + # more transparent
+      geom_line(data = predictions_filtered, mapping = aes(x = plant, y = percentile, col = type), size = cdf_line_width, alpha = 0.8) + # less transparent, for only between onset and too late to plant
+      scale_color_manual(values=c("black", '#EC7063', '#B9770E')) + # observed, no trend, trend cdf lines
+      geom_vline(mapping = aes(xintercept = obs_onset), col = '#3498DB', size = 1, alpha = transparency_onset_demise_lines) + # observed onset
+      geom_vline(mapping = aes(xintercept = pred_onset), col = '#3498DB', linetype = 'dashed',  
+                 size = 1, alpha = transparency_onset_demise_lines) + # predicted onset
+      geom_vline(mapping = aes(xintercept = obs_latest_plant), col = '#1B4F72',  size = 1, alpha = transparency_onset_demise_lines) + # observed latest plant
+      geom_vline(mapping = aes(xintercept = pred_latest_plant), col = '#1B4F72', linetype = 'dashed', 
+                 size = 1, alpha = transparency_onset_demise_lines) + # predicted latest plant
+      geom_segment(aes(x=obs_onset, xend=pred_onset, y=60, yend=60), size = 1, color = '#3498DB', alpha = transparency_arrows, 
+                   arrow = arrow(type="closed",ends="last",length=unit(0.3,"cm"))) +
+      geom_segment(aes(x=obs_latest_plant, xend=pred_latest_plant, y=40, yend=40), size = 1, color = '#21618C', alpha = transparency_arrows, 
+                   arrow = arrow(type="closed",ends="last",length=unit(0.3,"cm"))) +
+      ggtitle(paste('SUBPLOT Planting CDF',intensity, region, 'region', 'case', case_name)) +
+      xlab('Days after Aug 1') + 
+      xlim(50, 130) + # full axis: 30 to max_xlim
+      theme_bw() +
+      theme(panel.grid = element_blank(), 
+            axis.text.x = element_text(face="bold", size=12), # size for subplot = 15, size for fullplot = 12
+            axis.text.y = element_text(face="bold", size=12),
+            axis.title = element_text(size=12)
+            )
       
     print(predictions_plot)
+    #print(predictions_subplot)
   }
 }
 
@@ -717,42 +764,42 @@ delta_onset_likelihood_predicted$xID<- with(delta_onset_likelihood_predicted, pa
 
 ggplot(data = plant_delay_days_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_delay_days_predicted$value, 1))) + # write the values
+  geom_text(aes(label = round(plant_delay_days_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient2(name = "Days", low = "blue", high = "red", midpoint = 0) +
   ggtitle("Average delay in planting date in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_delay_percent_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_delay_percent_predicted$value, 1))) + # write the values
+  geom_text(aes(label = round(plant_delay_percent_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent planting that must be delayed in average 25km cell") +
   theme_bw()
 
 ggplot(data = DC_not_possible_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(DC_not_possible_predicted$value, 1))) + # write the values
+  geom_text(aes(label = round(DC_not_possible_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent double cropping that's infeasible in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_window_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_window_predicted$value, 1))) + # write the values
+  geom_text(aes(label = round(plant_window_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient(name = "Days", low = "red", high = "white") +
   ggtitle("Planting window in average 25km cell") +
   theme_bw()
 
 ggplot(data = delta_onset_touching5thpercentile_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(delta_onset_touching5thpercentile_predicted$value, 1))) + # write the values
+  #geom_text(aes(label = round(delta_onset_touching5thpercentile_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient2(name = "Days", low = "red", high = "blue", midpoint = 0) +
   ggtitle("Onset change at which planting dates experience hard limit [days]") +
   theme_bw()
 
 ggplot(data = delta_onset_likelihood_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1))) + # write the values
+  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient(name = "Days", low = "white", high = "red") +
   ggtitle("Probability that onset will become hard limit for planting [%]") +
   theme_bw()

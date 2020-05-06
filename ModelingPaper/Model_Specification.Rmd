@@ -28,7 +28,7 @@ library(Metrics)
 library(randomForest)
 
 # select the onset definition
-onset_type <- 'freq_8_chirps_ATchirps5km' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km', 'freq_10_persiann', 'AA_25_persiann'# 'Gabriel_onset'
+onset_type <- 'AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km', 'freq_10_persiann', 'AA_25_persiann'# 'Gabriel_onset'
 
 # import data for all sections
 os_system <- 'windows' # mac for laptop or windows for desktop
@@ -1853,6 +1853,14 @@ for (intensity in c("SC", "DC")) {
   }
 }
 
+# SAVED RESULTS
+saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
+
+```
+
+```{r}
+coefs_onset_oi <- readRDS(paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
+
 num_samples_to_test <- 1000 # number of samples to use in t-test and ks.test; max is 1000
 
 # t test -------------------------------------------------------------
@@ -2081,9 +2089,6 @@ print(year_coef_plot)
 
 ```{r}
 
-# SAVED RESULTS
-saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
 
-coefs_onset_oi <- readRDS(paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
 
 ```
