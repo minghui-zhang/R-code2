@@ -17,6 +17,7 @@ library(rgdal)
 library(raster)
 library(sf)
 library(sp)
+library(stats) # ks.test
 library(leaps)
 library(viridis)
 library(spatial)
@@ -27,7 +28,7 @@ library(Metrics)
 library(randomForest)
 
 # select the onset definition
-onset_type <- 'freq_10_persiann' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km', 'freq_10_persiann', 'AA_25_persiann'# 'Gabriel_onset'
+onset_type <- 'freq_8_chirps_ATchirps5km' #'freq_8_chirps_ATchirps5km' #'AA_25_chirps_ATchirps5km', 'freq_10_persiann', 'AA_25_persiann'# 'Gabriel_onset'
 
 # import data for all sections
 os_system <- 'windows' # mac for laptop or windows for desktop
@@ -1793,7 +1794,7 @@ for (n in 1:n_data_bootstrap) {
       bs_data_subset_panel <- pdata.frame(bs_data_subset, index = c("cell_ID"))
           
       # Step 3. run FE model, get coefficients
-      fe_model <- plm(plant ~ onset + year, data = bs_data_subset_panel, model = "within")
+      fe_model <- plm(bs_plant ~ onset + year, data = bs_data_subset_panel, model = "within")
       
       # get coefficients
       coefficients <- fe_model$coefficients
@@ -1823,21 +1824,15 @@ saveRDS(data_bootstrap_coefs, paste0("intermediateFE_bootstrapped_coefs_", onset
 data_bootstrap_coefs <- readRDS(paste0("intermediateFE_bootstrapped_coefs_", onset_type, ".rds"))
 ```
 
+# t test on 1000 samples from data_bootstrap_coefs 
+# and PLOT
 
 ```{r}
 
 final_bootstrap_coefs <- data.frame(intensity = character(0), percentile = character(0),
-                                    onset_coef = numeric(0), onset_sderr = numeric(0),
-                                    year_coef = numeric(0), year_sderr = numeric(0))
+                                    onset_coef = numeric(0), onset_sd = numeric(0),
+                                    year_coef = numeric(0), year_sd = numeric(0))
 
-bootstrap_one_coef <- function(row, mean_coef_name, sd_coef_name, n) {
-  mean_coef <- as.numeric(row[mean_coef_name])
-  sd_coef <- as.numeric(row[sd_coef_name])
-  bs_coefs <- rnorm(n = n, mean = mean_coef, sd = sd_coef)
-}
-
-onset_coefs_list <- vector("list", 6)
-year_coefs_list <- vector("list", 6)
 
 list_index <- 0
 for (intensity in c("SC", "DC")) {
@@ -1847,104 +1842,225 @@ for (intensity in c("SC", "DC")) {
 
     coefs <- data_bootstrap_coefs[(data_bootstrap_coefs$intensity == intensity) & (data_bootstrap_coefs$percentile == percentile),]
     
-    # these are matrices, rows = number of bootstraps from the standard error distribution
-    bs_onset_coefs <- apply(coefs,1,bootstrap_one_coef, mean_coef_name = 'onset_coef', sd_coef_name = 'onset_sderr', n = 10)
-    bs_year_coefs <- apply(coefs,1,bootstrap_one_coef, mean_coef_name = 'year_coef', sd_coef_name = 'year_sderr', n = 10)
-    
-    final_onset_coef <- mean(bs_onset_coefs)
-    final_onset_sderr <- sd(bs_onset_coefs)
-    final_year_coef <- mean(bs_year_coefs)
-    final_year_sderr <- sd(bs_year_coefs)
-    
-    onset_coefs_list[[list_index]] <- as.vector(bs_onset_coefs)
-    year_coefs_list[[list_index]] <- as.vector(bs_year_coefs)
+    final_onset_coef <- mean(coefs$onset_coef)
+    final_onset_sd <- sd(coefs$onset_coef)
+    final_year_coef <- mean(coefs$year_coef)
+    final_year_sd <- sd(coefs$year_coef)
     
     final_bootstrap_coefs <- rbind(final_bootstrap_coefs, data.frame(intensity = intensity, percentile = percentile,
-                                                                     onset_coef = final_onset_coef, onset_sderr = final_onset_sderr,
-                                                                     year_coef = final_year_coef, year_sderr = final_year_sderr))
+                                                                     onset_coef = final_onset_coef, onset_sd = final_onset_sd,
+                                                                     year_coef = final_year_coef, year_sd = final_year_sd))
   }
 }
 
-names(onset_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 
-                             'SC_percentile75', 'SC_percentile95', 
-                             'DC_percentile5', 'DC_percentile25', 'DC_median',
-                             'DC_percentile75', 'DC_percentile95')
-names(year_coefs_list) <- c('SC_percentile5', 'SC_percentile25', 'SC_median', 
-                            'SC_percentile75', 'SC_percentile95',
-                            'DC_percentile5', 'DC_percentile25', 'DC_median',
-                            'DC_percentile75', 'DC_percentile95')
+num_samples_to_test <- 1000 # number of samples to use in t-test and ks.test; max is 1000
 
-# compare coefs across intensities and groups
-num_samples_ttest <- 100 # the number of samples to take in the t test. more samples -> lower p value. total samples: 10000
-diff_intensities_median <- t.test(onset_coefs_list[['SC_median']][0:num_samples_ttest], 
-                                  onset_coefs_list[['DC_median']][0:num_samples_ttest], 
+# t test -------------------------------------------------------------
+diff_intensities_median <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
-diff_intensities_percentile25 <- t.test(onset_coefs_list[['SC_percentile25']][0:num_samples_ttest], 
-                                        onset_coefs_list[['DC_percentile25']][0:num_samples_ttest], 
+diff_intensities_percentile25 <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
-diff_intensities_percentile5 <- t.test(onset_coefs_list[['SC_percentile5']][0:num_samples_ttest], 
-                                       onset_coefs_list[['DC_percentile5']][0:num_samples_ttest], 
+diff_intensities_percentile5 <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
-diff_intensities_percentile75 <- t.test(onset_coefs_list[['SC_percentile75']][0:num_samples_ttest], 
-                                        onset_coefs_list[['DC_percentile75']][0:num_samples_ttest], 
+diff_intensities_percentile75 <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
-diff_intensities_percentile95 <- t.test(onset_coefs_list[['SC_percentile95']][0:num_samples_ttest], 
-                                        onset_coefs_list[['DC_percentile95']][0:num_samples_ttest], 
+diff_intensities_percentile95 <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test],  
                                  alternative = "two.sided", var.equal = FALSE)$p.value
 
-diff_percentile5_25_SC <- t.test(onset_coefs_list[['SC_percentile5']][0:num_samples_ttest], 
-                                 onset_coefs_list[['SC_percentile25']][0:num_samples_ttest], 
+diff_percentile5_25_SC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
-diff_percentile5_25_DC <- t.test(onset_coefs_list[['DC_percentile5']][0:num_samples_ttest], 
-                                 onset_coefs_list[['DC_percentile25']][0:num_samples_ttest], 
-                                 alternative = "two.sided", var.equal = FALSE)$p.value
-
-diff_percentile25_50_SC <- t.test(onset_coefs_list[['SC_percentile25']][0:num_samples_ttest], 
-                                  onset_coefs_list[['SC_median']][0:num_samples_ttest], 
-                                 alternative = "two.sided", var.equal = FALSE)$p.value
-diff_percentile25_50_DC <- t.test(onset_coefs_list[['DC_percentile25']][0:num_samples_ttest], 
-                                  onset_coefs_list[['DC_median']][0:num_samples_ttest], 
+diff_percentile5_25_DC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
 
-diff_percentile50_75_SC <- t.test(onset_coefs_list[['SC_median']][0:num_samples_ttest], 
-                                  onset_coefs_list[['SC_percentile75']][0:num_samples_ttest], 
+diff_percentile25_50_SC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
-diff_percentile50_75_DC <- t.test(onset_coefs_list[['DC_median']][0:num_samples_ttest], 
-                                  onset_coefs_list[['DC_percentile75']][0:num_samples_ttest], 
-                                 alternative = "two.sided", var.equal = FALSE)$p.value
-
-diff_percentile75_95_SC <- t.test(onset_coefs_list[['SC_percentile75']][0:num_samples_ttest], 
-                                  onset_coefs_list[['SC_percentile95']][0:num_samples_ttest], 
-                                 alternative = "two.sided", var.equal = FALSE)$p.value
-diff_percentile75_95_DC <- t.test(onset_coefs_list[['DC_percentile75']][0:num_samples_ttest], 
-                                  onset_coefs_list[['DC_percentile95']][0:num_samples_ttest], 
+diff_percentile25_50_DC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test], 
                                  alternative = "two.sided", var.equal = FALSE)$p.value
 
-print('p values comparing intensities: (for percentile95, to percentile5)')
+diff_percentile50_75_SC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_percentile50_75_DC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+
+diff_percentile75_95_SC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+diff_percentile75_95_DC <- t.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", var.equal = FALSE)$p.value
+
+print('t-test: p values comparing intensities: (for percentile95, to percentile5)')
 print(paste(diff_intensities_percentile95, diff_intensities_percentile95, diff_intensities_median, diff_intensities_percentile25, diff_intensities_percentile5))
 
-print('p values comparing percentile5 and percentile25 (for SC, then DC):')
+print('t-test: p values comparing percentile5 and percentile25 (for SC, then DC):')
 print(paste(diff_percentile5_25_SC, diff_percentile5_25_DC))
 
-print('p values comparing percentile25 and median (for SC, then DC):')
+print('t-test: p values comparing percentile25 and median (for SC, then DC):')
 print(paste(diff_percentile25_50_SC, diff_percentile25_50_DC))
 
-print('p values comparing percentile50 and percentile75 (for SC, then DC):')
+print('t-test: p values comparing percentile50 and percentile75 (for SC, then DC):')
 print(paste(diff_percentile50_75_SC, diff_percentile50_75_DC))
 
-print('p values comparing percentile75 and percentile95 (for SC, then DC):')
+print('t-test: p values comparing percentile75 and percentile95 (for SC, then DC):')
 print(paste(diff_percentile75_95_SC, diff_percentile75_95_DC))
 
+# kolmogorov-smirnov test --------------------------------------------------------
+diff_intensities_median <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_intensities_percentile25 <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_intensities_percentile5 <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_intensities_percentile75 <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_intensities_percentile95 <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test],  
+                                 alternative = "two.sided", exact = TRUE)$p.value
 
-print(final_bootstrap_coefs)
+diff_percentile5_25_SC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_percentile5_25_DC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile5', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
 
-# rename levels for plotting
+diff_percentile25_50_SC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_percentile25_50_DC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile25', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+
+diff_percentile50_75_SC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_percentile50_75_DC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'median', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+
+diff_percentile75_95_SC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+diff_percentile75_95_DC <- ks.test(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef'][0:num_samples_to_test],
+                                  data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef'][0:num_samples_to_test], 
+                                 alternative = "two.sided", exact = TRUE)$p.value
+
+print('ks test: p values comparing intensities: (for percentile95, to percentile5)')
+print(paste(diff_intensities_percentile95, diff_intensities_percentile95, diff_intensities_median, diff_intensities_percentile25, diff_intensities_percentile5))
+
+print('ks test: p values comparing percentile5 and percentile25 (for SC, then DC):')
+print(paste(diff_percentile5_25_SC, diff_percentile5_25_DC))
+
+print('ks test: p values comparing percentile25 and median (for SC, then DC):')
+print(paste(diff_percentile25_50_SC, diff_percentile25_50_DC))
+
+print('ks test: p values comparing percentile50 and percentile75 (for SC, then DC):')
+print(paste(diff_percentile50_75_SC, diff_percentile50_75_DC))
+
+print('ks test: p values comparing percentile75 and percentile95 (for SC, then DC):')
+print(paste(diff_percentile75_95_SC, diff_percentile75_95_DC))
+
+# plot distributions -----------------------------------------------------------------------------------------
+pdfs_DC_comparingPercentiles <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'DC', ], 
+       aes(x=onset_coef, fill = percentile)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('Double cropped soy') +
+  theme_bw()
+
+pdfs_SC_comparingPercentiles <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC', ], 
+       aes(x=onset_coef, fill = percentile)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('Single cropped soy') +
+  theme_bw()
+
+pdfs_percentile5_comparingIntensities <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$percentile == 'percentile5', ], 
+       aes(x=onset_coef, fill = intensity)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('5th percentile') +
+  theme_bw()
+
+pdfs_percentile25_comparingIntensities <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$percentile == 'percentile25', ], 
+       aes(x=onset_coef, fill = intensity)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('25th percentile') +
+  theme_bw()
+
+pdfs_percentile50_comparingIntensities <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$percentile == 'median', ], 
+       aes(x=onset_coef, fill = intensity)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('50th percentile') +
+  theme_bw()
+
+pdfs_percentile75_comparingIntensities <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$percentile == 'percentile75', ], 
+       aes(x=onset_coef, fill = intensity)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('75th percentile') +
+  theme_bw()
+
+pdfs_percentile95_comparingIntensities <- ggplot(data_bootstrap_coefs[data_bootstrap_coefs$percentile == 'percentile95', ], 
+       aes(x=onset_coef, fill = intensity)) + 
+  geom_histogram(bins = 100, alpha = 0.3, position="dodge") +
+  geom_density(alpha=.5) +
+  ggtitle('95th percentile') +
+  theme_bw()
+
+print(pdfs_DC_comparingPercentiles)
+print(pdfs_SC_comparingPercentiles)
+print(pdfs_percentile5_comparingIntensities)
+print(pdfs_percentile25_comparingIntensities)
+print(pdfs_percentile50_comparingIntensities)
+print(pdfs_percentile75_comparingIntensities)
+print(pdfs_percentile95_comparingIntensities)
+
+# t-statistic by hand for comparing 75th vs 95th percentile, SC (unequal variance) ------------------------------------
+
+group1 <- data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile75', 'onset_coef']
+group2 <- data_bootstrap_coefs[data_bootstrap_coefs$intensity == 'SC' & data_bootstrap_coefs$percentile == 'percentile95', 'onset_coef']
+n1 <- length(group1)
+n2 <- length(group2)
+t_byhand <- (mean(group1) - mean(group2)) / sqrt(var(group1) / n1 + var(group2) / n2)
+
+print('t test by hand to compare 75th and 95th percentile, SC, unequal variance')
+print(paste('t statistic:', t_byhand))
+
+# t-distribution ------------------------------------------------------------------------------------
+t_dist_to_plot <- data.frame(t = seq(-20, 20, length = 100),
+                             density = dt(seq(-20, 20, length = 100), df = 1998)) # degrees of freedom = n1 + n2 - 2
+t_dist_plot <- ggplot(t_dist_to_plot) +
+  geom_line(aes(x = t, y = density)) +
+  ggtitle('t-distribution with df = 1998') + 
+  theme_bw()
+
+print(t_dist_plot)
+
+# rename levels for plotting ---------------------------------------------------------------------------------
 levels(final_bootstrap_coefs$intensity) <- c('Single cropped', 'Double cropped')
 levels(final_bootstrap_coefs$percentile) <- c('5th', '25th', '50th', '75th', '95th')
 
 onset_coef_plot <- ggplot(final_bootstrap_coefs) +
   geom_point(aes(x = percentile, y = onset_coef)) + 
-  geom_errorbar(aes(ymin=onset_coef-onset_sderr, ymax=onset_coef+onset_sderr, x = percentile)) +
+  geom_errorbar(aes(ymin=onset_coef-onset_sd, ymax=onset_coef+onset_sd, x = percentile)) +
   facet_wrap(~ intensity) +
   ggtitle(paste('Bootstrapped onset coefficients with', onset_type)) + 
   theme_bw() +
@@ -1952,7 +2068,7 @@ onset_coef_plot <- ggplot(final_bootstrap_coefs) +
 
 year_coef_plot <- ggplot(final_bootstrap_coefs) +
   geom_point(aes(x = percentile, y = year_coef)) + 
-  geom_errorbar(aes(ymin=year_coef-year_sderr, ymax=year_coef+year_sderr, x = percentile)) +
+  geom_errorbar(aes(ymin=year_coef-year_sd, ymax=year_coef+year_sd, x = percentile)) +
   facet_wrap(~ intensity) +
   ggtitle(paste('Bootstrapped year coefficients with', onset_type)) + 
   theme_bw() +
@@ -1961,11 +2077,12 @@ year_coef_plot <- ggplot(final_bootstrap_coefs) +
 print(onset_coef_plot)
 print(year_coef_plot)
 
-# SAVED RESULTS
-saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
 ```
 
 ```{r}
+
+# SAVED RESULTS
+saveRDS(final_bootstrap_coefs, paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
 
 coefs_onset_oi <- readRDS(paste0("FE_bootstrapped_coefs_", onset_type, ".rds"))
 
