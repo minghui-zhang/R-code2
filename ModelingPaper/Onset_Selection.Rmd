@@ -442,7 +442,8 @@ for (crop_intensity in c("SC", "DC")) {
         geom_point(mapping = aes(x=best_onset_def_type_thres[2], y=best_onset_coefs[2]), colour="black", shape = 1, size = 7) +
         geom_point(mapping = aes(x=best_onset_def_type_thres[3], y=best_onset_coefs[3]), colour="black", shape = 1, size = 7) +
         theme_bw() +
-        theme(axis.text.x = element_text(angle = 90)) +
+        theme(axis.text.x = element_text(angle = 90),
+              axis.text.y = element_text(size = 15)) +
         ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
         ylim(c(0, 0.6)) +
         ylab('onset coefficient')
