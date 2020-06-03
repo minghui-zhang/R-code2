@@ -1053,7 +1053,7 @@ Calculate mean planting date across years for a given intensity and percentile
 ```{r}
 
 intensity <- 'SC'
-percentile <- 'percentile25'
+percentile <- 'median'
 
 onset_oi_data_subset <- onset_oi_data[onset_oi_data$intensity == intensity & onset_oi_data$plant_stat_type == percentile,]
 
@@ -1129,13 +1129,29 @@ joined_11years['mean_plant'] <- mean_plant
 
 mean_plant_plot <- ggplot(joined_11years) +
         geom_sf(aes(fill = mean_plant), color = NA) +
-        scale_fill_viridis(limits = c(60, 120)) +
+        scale_fill_viridis(limits = c(70, 120)) +
         ggtitle(paste('mean plant, all years', intensity, percentile)) +
         geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black",
                      alpha = 0, linetype = 1) +
         theme_bw()
 
 print(mean_plant_plot)
+
+# calculate spatial variability metrics
+
+# moran's I
+library(spdep)
+to_autocorrelation <- joined_11years
+nb <- poly2nb(to_autocorrelation)
+lw <- nb2listw(nb, zero.policy = TRUE)
+moran_plant <- moran.mc(to_autocorrelation$mean_plant, lw, 999, zero.policy = TRUE)
+print('moran I of mean plant')
+print(moran_plant)
+
+# standard deviation
+print('standard deviation')
+print(sd(joined_11years$mean_plant))
+
 ```
 
 Timeseries of onset, averaged over space
