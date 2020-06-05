@@ -1,0 +1,105 @@
+---
+title: "Mapping"
+output: html_document
+---
+
+Import data (data is from Modeling/Extract_data_all_cells_1)
+
+```{r}
+# import data
+
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(rgdal)
+library(raster)
+library(sf)
+library(sp)
+library(leaps)
+library(viridis)
+library(spatial)
+library(spdep)
+library(plm)
+
+onset_type <- 'AA_25_persiann_allcells'
+
+os_system <- 'windows' # mac for laptop or windows for desktop
+if (os_system == 'windows') {first_folder <- 'E:'}
+if (os_system == 'mac') {first_folder <- '~/Documents'}
+if (os_system == 'windows_laptop') {first_folder <- 'D:'}
+
+#E:/R-code/Modeling/code/FCN_clean_csvs.R
+#~/Documents/R-code
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_clean_csvs.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_plotting.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_sample_data.R'))
+source(paste0(first_folder,'/R-code2/Modeling/code/FCN_run_model_spatial_sampled.R'))
+
+
+MT_outline <- readOGR(dsn = paste0(first_folder,'/R-code2/Modeling/data/shp/MatoGrossoOutline'), layer = 'MatoGrossoOutline')
+crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+
+# cell data -------------------------------------------------------------------------------------------
+filename_cell_median <- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, 
+                            '/median_onset_cell_', onset_type, '.csv')
+
+
+filename_cell_shp<- paste0(first_folder,'/R-code-large-files/data_onset_', onset_type, '/shp')
+layername_cell_shp <- paste0('median_onset_cell_SHP_', onset_type)
+
+median_cell_raw <- read.csv(filename_cell_median)
+
+cell_sf <- st_read(dsn = filename_cell_shp, layer = layername_cell_shp)
+```
+
+Create map of onset and DC soy planted area for all cells in MT
+
+```{r}
+
+year <- 2014
+cell_sf_year <- cell_sf[cell_sf$year == year,]
+
+cell_sf_year$DC_area_category <- cut(cell_sf_year$DC_area_km, 
+                                         breaks = c(1, 10, 30, 50, 100, 150, 200, 250, 400),
+                                         labels = c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200 - 250', '250+'))
+
+cell_sf_year$SC_area_category <- cut(cell_sf_year$SC_area_km, 
+                                         breaks = c(1, 10, 30, 50, 100, 150, 200, 250, 400),
+                                         labels = c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200 - 250', '250+'))
+
+onset_map <- ggplot(cell_sf_year) +
+      geom_sf(aes(fill = onset), colour = NA) +
+      scale_fill_gradient(low="darkblue", high="lightblue", limits = c(30, 90)) +
+      ggtitle(paste("Wet season onset", year)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+    
+DC_area_map <- ggplot(cell_sf_year) +
+      geom_sf(aes(fill = DC_area_category), colour = NA) +
+      scale_fill_brewer(type = 'seq', palette = 'YlGn', limits=c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200 - 250', '250+')) +
+      ggtitle(paste("DC area km2", year)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+SC_area_map <- ggplot(cell_sf_year) +
+      geom_sf(aes(fill = SC_area_category), colour = NA) +
+      scale_fill_brewer(type = 'seq', palette = 'YlGn', limits=c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200 - 250', '250+')) +
+      ggtitle(paste("SC area km2", year)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+
+print(onset_map)
+print(DC_area_map)
+print(SC_area_map)
+```
+

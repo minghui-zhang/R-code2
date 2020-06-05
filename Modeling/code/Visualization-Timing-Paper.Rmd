@@ -165,24 +165,24 @@ cell_sf_tidy_harvest$year_index <- cell_sf_tidy_harvest$year - 2003
 
 ```{r}
 
-year_oi <- 2014
+year_oi <- 2011
 
 cell_sf_tidy_plant <- cell_sf_tidy_plant %>% drop_na()
 cell_sf_tidy_harvest <- cell_sf_tidy_harvest %>% drop_na()
 
-plot_cell_plant <- function(year, cell_data, intensity) {
+plot_cell_plant <- function(year, cell_data, intensity, limits_labels) {
   cell_year <- cell_data[cell_data$year == year, ]
   
   ggplot(cell_year) +
    geom_sf(aes(fill = plant_category), colour = NA) +
    #scale_fill_viridis(limits = c(50, 150)) +
    #scale_fill_continuous(low = '#f7fcb9', high = '#31a354', na.value = 'white', space = "Lab", limits = c(50, 150)) +
-    scale_fill_brewer(type = 'seq', palette = 'YlGnBu') +
+    scale_fill_brewer(type = 'seq', palette = 'YlGnBu', limits = limits_labels) +
    ggtitle(paste(intensity, "plant", year)) +
    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
    theme_bw() +
-    theme(axis.title.y=element_blank(),
-        axis.text.y=element_blank(), axis.ticks.y=element_blank(), 
+    theme(#axis.title.y=element_blank(),
+        #axis.text.y=element_blank(), axis.ticks.y=element_blank(), 
         #axis.title.x=element_blank(),
         #axis.text.x=element_blank(), axis.ticks.x=element_blank(), 
         text = element_text(size=15))
@@ -190,24 +190,27 @@ plot_cell_plant <- function(year, cell_data, intensity) {
 }
 
 
-plot_cell_harvest <- function(year, cell_data, intensity) {
+plot_cell_harvest <- function(year, cell_data, intensity, limits_labels) {
   cell_year <- cell_data[cell_data$year == year, ]
   
   ggplot(cell_year) +
    geom_sf(aes(fill = harvest_category), colour = NA) +
    #scale_fill_viridis(limits = c(150, 250)) +
    #scale_fill_continuous(low = '#fde0dd', high = '#c51b8a', na.value = 'white', space = "Lab", limits = c(150, 250)) +
-    scale_fill_brewer(type = 'seq', palette = 'YlOrRd') +
+    scale_fill_brewer(type = 'seq', palette = 'YlOrRd', limits = limits_labels) +
    ggtitle(paste(intensity, "harvest", year)) +
    geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
    theme_bw() +
-    theme(axis.title.y=element_blank(),
-        axis.text.y=element_blank(), axis.ticks.y=element_blank(), 
+    theme(#axis.title.y=element_blank(),
+        #axis.text.y=element_blank(), axis.ticks.y=element_blank(), 
         #axis.title.x=element_blank(),
         #axis.text.x=element_blank(), axis.ticks.x=element_blank(), 
         text = element_text(size=15))
 
 }
+
+limits_labels_plant <- c('50 - 75', '75 - 90', '90 - 105', '105 - 120', '120 - 135', '135 - 150')
+limits_labels_harvest <- c('150 - 175', '175 - 190', '190 - 205', '205 - 220', '220 - 235', '235 - 250')
 
 cell_sf_tidy_plant$plant_category <- cut(cell_sf_tidy_plant$plant, 
                                          breaks = c(50, 75, 90, 105, 120, 135, 150),
@@ -228,8 +231,8 @@ cell_sf_tidy_harvest_SC <- cell_sf_tidy_harvest[cell_sf_tidy_harvest$intensity =
                         filter(harvest < 250)
 
 
-print(plot_cell_plant(year_oi, cell_sf_tidy_plant_DC, "DC"))
-print(plot_cell_harvest(year_oi, cell_sf_tidy_harvest_DC, "DC"))
-print(plot_cell_plant(year_oi, cell_sf_tidy_plant_SC, "SC"))
-print(plot_cell_harvest(year_oi, cell_sf_tidy_harvest_SC, "SC"))
+print(plot_cell_plant(year_oi, cell_sf_tidy_plant_DC, "DC", limits_labels_plant))
+print(plot_cell_harvest(year_oi, cell_sf_tidy_harvest_DC, "DC", limits_labels_harvest))
+print(plot_cell_plant(year_oi, cell_sf_tidy_plant_SC, "SC", limits_labels_plant))
+print(plot_cell_harvest(year_oi, cell_sf_tidy_harvest_SC, "SC", limits_labels_harvest))
 ```
