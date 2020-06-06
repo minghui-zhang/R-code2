@@ -51,13 +51,19 @@ layername_cell_shp <- paste0('median_onset_cell_SHP_', onset_type)
 median_cell_raw <- read.csv(filename_cell_median)
 
 cell_sf <- st_read(dsn = filename_cell_shp, layer = layername_cell_shp)
+
+# sf data: assign 'cell id' as integers. we can do this because each year has same number of cells, didn't mask by planted cells
+num_cells <- nrow(cell_sf[cell_sf$year == 2004,])
+cell_num <- rep(1:num_cells, times = 11)
+cell_sf$cell_num <- cell_num
+
 ```
 
 Create map of onset and DC soy planted area for all cells in MT
 
 ```{r}
 
-year <- 2014
+year <- 2004
 cell_sf_year <- cell_sf[cell_sf$year == year,]
 
 cell_sf_year$DC_area_category <- cut(cell_sf_year$DC_area_km, 
@@ -74,7 +80,14 @@ cell_sf_year$SC_area_category <- cut(cell_sf_year$SC_area_km,
 
 onset_map <- ggplot(cell_sf_year) +
       geom_sf(aes(fill = onset), colour = NA) +
-      scale_fill_gradient(low="darkblue", high="lightblue", limits = c(30, 90)) +
+      scale_fill_gradient(low="darkblue", high="white", limits = c(30, 90)) +
+      ggtitle(paste("Wet season onset", year)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+demise_map <- ggplot(cell_sf_year) +
+      geom_sf(aes(fill = demise), colour = NA) +
+      scale_fill_gradient(low="darkred", high="white", limits = c(220, 340)) +
       ggtitle(paste("Wet season onset", year)) +
       geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
       theme_bw()
@@ -99,7 +112,111 @@ SC_area_map <- ggplot(cell_sf_year) +
 
 
 print(onset_map)
+print(demise_map)
 print(DC_area_map)
 print(SC_area_map)
 ```
 
+Area of DC that will be infeasible (compared to 2014 values)
+```{r}
+
+year <- 2014
+cell_sf_year <- cell_sf[cell_sf$year == year,]
+
+trend <- FALSE
+case <- 'worst'
+
+# the percent of DC that's infeasible compared to 2014 DC area
+if (trend & case == 'medium') {
+  NW_fraction <- 0
+  NE_fraction <- 0.12
+}
+
+if (trend & case == 'worst') {
+  NW_fraction <- 0.211
+  NE_fraction <- 0.739
+}
+
+if (!trend & case == 'medium') {
+  NW_fraction <- 0.095
+  NE_fraction <- 0.422
+}
+
+if (!trend & case == 'worst') {
+  NW_fraction <- 0.753
+  NE_fraction <- 1
+}
+
+
+NW_sf_year <- cell_sf_year[cell_sf_year$lat > -15 & cell_sf_year$lon < -54,]
+NE_sf_year <- cell_sf_year[cell_sf_year$lat > -15 & cell_sf_year$lon >= -54,]
+
+NW_sf_year$DC_area_nowInfeasible_km2 <- NW_fraction*NW_sf_year$DC_area_km
+NE_sf_year$DC_area_nowInfeasible_km2 <- NE_fraction*NE_sf_year$DC_area_km
+
+newlyInfeasible_DC <- rbind(NW_sf_year, NE_sf_year)
+
+newlyInfeasible_DC$infeasible_DC_area_category <- cut(newlyInfeasible_DC$DC_area_nowInfeasible_km2, 
+                                         breaks = c(1, 10, 30, 50, 100, 150, 200, 400),
+                                         labels = c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200+'))
+
+infeasible_DC_area_map <- ggplot(newlyInfeasible_DC) +
+      geom_sf(aes(fill = infeasible_DC_area_category), colour = NA) +
+      scale_fill_brewer(type = 'seq', palette = 'YlOrRd', limits=c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200+')) +
+      ggtitle(paste("DC area newly infeasible km2", case, " trend = ", trend)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+print(infeasible_DC_area_map)
+```
+
+Mean onset and demise, 2004 to 2014
+
+```{r}
+library(reshape)
+
+yearly_onset <- reshape::cast(cell_sf, cell_num ~ year, value = 'onset') %>% subset(select = -c(cell_num))
+yearly_demise <- reshape::cast(cell_sf, cell_num ~ year, value = 'demise') %>% subset(select = -c(cell_num))
+ 
+mean_onset <- rowMeans(yearly_onset)
+mean_demise <- rowMeans(yearly_demise)
+
+mean_onset_sf <- cell_sf[cell_sf$year == 2004,]
+mean_onset_sf$mean_onset <- mean_onset
+
+mean_demise_sf <- cell_sf[cell_sf$year == 2004,]
+mean_demise_sf$mean_demise <- mean_demise
+
+mean_onset_sf$mean_onset_category <- cut(mean_onset_sf$mean_onset, 
+                                         breaks = c(30, 40, 50, 55, 60, 70, 80, 90),
+                                         labels = c('30 - 40', '40 - 50', '50 - 55', '55 - 60',
+                                                    '60 - 70', '70 - 80', '80 - 90'))
+mean_demise_sf$mean_demise_category <- cut(mean_demise_sf$mean_demise, 
+                                         breaks = c(200, 210, 220, 230, 240, 250, 260, 270, 280),
+                                         labels = c('200 - 210', '210 - 220', '220 - 230', 
+                                                    '230 - 240', '240 - 250', '250 - 260', 
+                                                    '260 - 270', '280 - 290'))
+
+mean_onset_map <- ggplot(mean_onset_sf) +
+      geom_sf(aes(fill = mean_onset_category), colour = NA) +
+      scale_fill_brewer(type = 'seq', palette = 'Blues', direction=-1) +
+      ggtitle("Mean wet season onset, 2004 - 2014") +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      geom_polygon(data = soy_2014_polygon, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+mean_demise_map <- ggplot(mean_demise_sf) +
+      geom_sf(aes(fill = mean_demise_category), colour = NA) +
+      scale_fill_brewer(type = 'seq', palette = 'Reds', direction = -1) +
+      ggtitle("Mean wet season demise, 2004 - 2014") +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+print(mean_onset_map)
+print(mean_demise_map)
+
+```
