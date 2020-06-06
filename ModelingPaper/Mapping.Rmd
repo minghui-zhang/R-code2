@@ -206,7 +206,6 @@ mean_onset_map <- ggplot(mean_onset_sf) +
       scale_fill_brewer(type = 'seq', palette = 'Blues', direction=-1) +
       ggtitle("Mean wet season onset, 2004 - 2014") +
       geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
-      geom_polygon(data = soy_2014_polygon, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
       theme_bw()
 
 mean_demise_map <- ggplot(mean_demise_sf) +
