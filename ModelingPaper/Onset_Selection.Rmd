@@ -403,6 +403,11 @@ Perform chosen FE model specification for each onset definition
 
 # save top five model specs in each intensity x plant_stat_type
 top_onsets <- data.frame()
+top_onsets_subset <- data.frame()
+
+# best definition for 25th percentile SC and DC. for plotting
+best_onset_defs_DC_percentile25 <- c('AA_2.5', 'freq_10', 'monsoon_30', 'pentad_10', 'rangethres_10_15_20_30', 'thres_10')
+best_onset_defs_SC_percentile25 <- c('AA_2.5', 'freq_8', 'monsoon_30', 'pentad_10', 'rangethres_10_15_15_40', 'thres_10')
 
 # tabulate onset coef for different intensities, precip datasets, percentiles
 for (crop_intensity in c("SC", "DC")) {
@@ -425,6 +430,36 @@ for (crop_intensity in c("SC", "DC")) {
                                                   plant_stat_type = rep(plant_stat_type, 5),
                                                   onset_type = results$onset_type[(nrow(results)-4):nrow(results)]))
       
+      # for summary plot, get the top onset for each onset definition type
+      if (crop_intensity == "SC") {
+        results_best_subset <- results[results$onset_def_type_thres %in% best_onset_defs_SC_percentile25,]
+        
+        # get the top result for plotting
+        results_subset_ordered <- results_best_subset[dim(results_best_subset)[1]:1,] # so best onset definition is the top row
+        best_onset_coefs_subset <- results_subset_ordered[1:3,'onset_coef']
+        best_onset_def_type_thres_subset <- results_subset_ordered[1:3, 'onset_def_type_thres']
+      
+        # save top five onsets
+        top_onsets_subset <- rbind(top_onsets_subset, data.frame(
+                                                  crop_intensity = rep(crop_intensity, 5),
+                                                  plant_stat_type = rep(plant_stat_type, 5),
+                                                  onset_type = results_best_subset$onset_type[(nrow(results)-4):nrow(results)]))
+        }
+      if (crop_intensity == "DC") {
+        results_best_subset <- results[results$onset_def_type_thres %in% best_onset_defs_DC_percentile25,]
+        
+        # get the top result for plotting
+        results_subset_ordered <- results_best_subset[dim(results_best_subset)[1]:1,] # so best onset definition is the top row
+        best_onset_coefs_subset <- results_subset_ordered[1:3,'onset_coef']
+        best_onset_def_type_thres_subset <- results_subset_ordered[1:3, 'onset_def_type_thres']
+      
+        # save top five onsets
+        top_onsets_subset <- rbind(top_onsets_subset, data.frame(
+                                                  crop_intensity = rep(crop_intensity, 5),
+                                                  plant_stat_type = rep(plant_stat_type, 5),
+                                                  onset_type = results_best_subset$onset_type[(nrow(results)-4):nrow(results)]))
+        }
+      
       # y axis limits: 5th percentile (0.1 to 0.5); 25th percentile (0.1 to 0.4); 50th percentile (0 to 0.4); 75th percentile (0 to 0.4); 95th percentile (0 to 0.3)
       best_onset_plot <- ggplot(results) +
         geom_point(aes(x = onset_type, y = onset_coef)) +
@@ -435,6 +470,7 @@ for (crop_intensity in c("SC", "DC")) {
         ylim(c(0, 0.6)) +
         ylab('onset coefficient')
       
+      my_colors <- c('25km_persiann' = '#80CDC1', '5km_chirps' = '#A6611A')
       best_onset_plot_scaleCompare <- ggplot(mapping = aes(x = onset_def_type_thres, y = onset_coef, col = onset_scale), results) +
         geom_point() +
         geom_errorbar(aes(ymin=onset_coef-onset_coef_stderr, ymax=onset_coef+onset_coef_stderr)) +
@@ -448,6 +484,18 @@ for (crop_intensity in c("SC", "DC")) {
         ylim(c(0, 0.6)) +
         ylab('onset coefficient')
       
+      best_onset_plot_scaleCompare_subset <- ggplot(mapping = aes(x = onset_def_type_thres, y = onset_coef, col = onset_scale), results_best_subset) +
+        geom_point() +
+        geom_errorbar(aes(ymin=onset_coef-onset_coef_stderr, ymax=onset_coef+onset_coef_stderr)) +
+        geom_point(mapping = aes(x=best_onset_def_type_thres_subset[1], y=best_onset_coefs_subset[1]), colour="black", shape = 1, size = 7) +
+        theme_bw() +
+        scale_color_manual(values = my_colors) +
+        theme(axis.text.x = element_text(angle = 90),
+              axis.text.y = element_text(size = 15)) +
+        ggtitle(paste(crop_intensity, ",", plant_stat_type)) +
+        ylim(c(0.1, 0.4)) +
+        ylab('onset coefficient')
+            
       R2_plot <- ggplot(results) +
         geom_point(aes(x = onset_type, y = R2), color = "blue") +
         theme_bw() +
@@ -485,7 +533,8 @@ for (crop_intensity in c("SC", "DC")) {
         ylab('onset coefficient')
       
       #print(best_onset_plot)
-      print(best_onset_plot_scaleCompare)
+      #print(best_onset_plot_scaleCompare)
+      print(best_onset_plot_scaleCompare_subset)
       #print(best_onset_plot_persiann)
       #print(R2_plot)
       #print(moran_i_pval_residual_plot_scaleCompare)
@@ -525,16 +574,36 @@ results_AA_25$plant_stat_type <- factor(results_AA_25$plant_stat_type,
 my_colors <- c('AA_25_chirps_ATgabriel25km' = '#018571', 'AA_25_persiann_ATgabriel25km' = '#80CDC1', 
                'AA_25_chirps_ATchirps5km' = '#A6611A')
 
-ggplot(results_AA_25, aes(x = plant_stat_type, y = onset_coef)) + #, col = onset_type)) +
+full_plot <- ggplot(results_AA_25, aes(x = plant_stat_type, y = onset_coef)) + #, col = onset_type)) +
   geom_point(alpha = 1, aes(col = onset_type), size = 1.5) + 
   facet_wrap(~ intensity) +
   scale_color_manual(values = my_colors) +
   theme_bw() +
+  coord_fixed(ratio = 10) +
   theme(axis.text.x = element_text(angle = 90)) 
 # group the x axis by precip type, scale
 
-# barplots for the most frequently occuring 'top onset' across intensities and percentiles
+SC_plot <- ggplot(results_AA_25[results_AA_25$intensity == 'SC',], aes(x = plant_stat_type, y = onset_coef)) + #, col = onset_type)) +
+  geom_point(alpha = 1, aes(col = onset_type), size = 3) + 
+  scale_color_manual(values = my_colors) +
+  theme_bw() +
+  ggtitle('SC') +
+  ylim(c(0, 0.4)) +
+  theme(axis.text.x = element_text(angle = 90),
+        axis.text.y = element_text(size = 15))
 
+DC_plot <- ggplot(results_AA_25[results_AA_25$intensity == 'DC',], aes(x = plant_stat_type, y = onset_coef)) + #, col = onset_type)) +
+  geom_point(alpha = 1, aes(col = onset_type), size = 3) + 
+  scale_color_manual(values = my_colors) +
+  theme_bw() +
+  ylim(c(0, 0.4)) +
+  ggtitle('DC') +
+  theme(axis.text.x = element_text(angle = 90),
+        axis.text.y = element_text(size = 15)) 
+
+print(full_plot)
+print(SC_plot)
+print(DC_plot)
 ```
 
 The difference between chirps and persiann is mainly due to scale difference. When chirps and persiann are aggregated to the same grid, their onset coefficient is very similar. The difference between chirps at 5km and chirps at 25km is much larger, meaning that the scale makes a bigger difference than the precipitation data source. 

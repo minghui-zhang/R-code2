@@ -243,6 +243,24 @@ ggplot(ne_predictions) +
   geom_text(aes(x = 2035, y = 300, label = "Predictions"), color = "black", size = 5) +
   theme_bw()
 
+ggplot(ne_predictions_tidy) +
+  geom_line(aes(x = time, y = day, color = wet_season_metric), size = 2) +
+  ggtitle('Predictions for northeast Mato Grosso') +
+  ylab('Days after Aug 1') +
+  xlab('Year') +
+  xlim(c(2020, 2050)) +
+  coord_fixed(ratio = 0.04) +
+  theme_bw()
+
+ggplot(nw_predictions_tidy) +
+  geom_line(aes(x = time, y = day, color = wet_season_metric), size = 2) +
+  ggtitle('Predictions for northwest Mato Grosso') +
+  ylab('Days after Aug 1') +
+  xlab('Year') +
+  xlim(c(2020, 2050)) +
+  coord_fixed(ratio = 0.04) +
+  theme_bw()
+
 # calculate change in onset in 2020- 2049 relative to 1970 - 2000 for likelihood calculations
 delta_onset_ne_predictions <- ne_predictions
 delta_onset_ne_predictions$delta_onset <- delta_onset_ne_predictions$onset - ne_onset_mean_before
@@ -361,7 +379,6 @@ for (intensity in c('SC', 'DC')) {
       demise_change <- demise_change_vulnerable
     }
     
-    if (region == 'not_vulnerable') {
       cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon <= region_cutoff,] # west # cell_df$year == year_oi & 
       onset_change <- onset_change_not_vulnerable
       demise_change <- demise_change_not_vulnerable
