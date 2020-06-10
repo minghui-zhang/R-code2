@@ -42,7 +42,7 @@ crs(MT_outline) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs8
 
 ```
 
-# Note: we use demise_AA_25_persiann because we use A!_2.5_persiann to make predictions
+# Note: we use demise_AA_25_persiann because we use AA_2.5_persiann to make predictions
 
 ```{r}
 onset_oi <- 'demise_AA_25_persiann' #'freq_8_chirps_ATchirps5km' #'freq_10_persiann'
@@ -378,7 +378,7 @@ for (intensity in c('SC', 'DC')) {
       onset_change <- onset_change_vulnerable
       demise_change <- demise_change_vulnerable
     }
-    
+    if (region != 'vulnerable') {
       cell_df_subset <- cell_df[cell_df$year == year_oi & cell_df$intensity == intensity & cell_df$lon <= region_cutoff,] # west # cell_df$year == year_oi & 
       onset_change <- onset_change_not_vulnerable
       demise_change <- demise_change_not_vulnerable
@@ -497,7 +497,7 @@ for (intensity in c('SC', 'DC')) {
       coef_year_50thpercentile <- coefs_onset_oi[coefs_onset_oi$intensity == intensity & coefs_onset_oi$percentile == "percentile50", "year_coef"]
 
       if (pred_type == 'pred_onset_change') {
-        delta_onset_touching5thpercentile <- (percentile5_obs - coef_onset_5thpercentile*obs_onset)/(1 - coef_onset_5thpercentile) - obs_onset
+        delta_onset_touching5thpercentile <- (obs_onset - percentile5_obs)/(coef_onset_5thpercentile - 1)#(percentile5_obs - coef_onset_5thpercentile*obs_onset)/(1 - coef_onset_5thpercentile) - obs_onset
         delta_onset_touching50thpercentile <- (percentile50_obs - coef_onset_50thpercentile*obs_onset)/(1 - coef_onset_50thpercentile) - obs_onset
         
         delta_onset_likelihood_touching5thpercentile <- 100 - 
@@ -511,8 +511,10 @@ for (intensity in c('SC', 'DC')) {
                                                xout = delta_onset_touching50thpercentile)$y
       }
       if (pred_type == 'pred_onset_year_change') {
-        delta_onset_touching5thpercentile <- (percentile5_obs - coef_onset_5thpercentile*obs_onset + 
-                                                        coef_year_5thpercentile*10)/(1 - coef_onset_5thpercentile) - obs_onset
+        delta_onset_touching5thpercentile <- (obs_onset - percentile5_obs -  coef_year_5thpercentile*10)/(coef_onset_5thpercentile - 1)
+                                              #          coef_year_5thpercentile*10)/(1 - coef_onset_5thpercentile)
+                                                #(percentile5_obs - coef_onset_5thpercentile*obs_onset + 
+                                              #          coef_year_5thpercentile*10)/(1 - coef_onset_5thpercentile) - obs_onset
         delta_onset_touching50thpercentile <- (percentile50_obs - coef_onset_50thpercentile*obs_onset + 
                                                         coef_year_50thpercentile*10)/(1 - coef_onset_50thpercentile) - obs_onset
         
@@ -631,8 +633,70 @@ for (intensity in c('SC', 'DC')) {
             axis.text.y = element_text(face="bold", size=12),
             axis.title = element_text(size=12)
             )
+    
+    # this plot is to demonstrate the metric of 'available' change in onset before 5th percentile planting is touched
+    # get the 'available' onset change for trend and no trend cases
+    onset_change_available_trend <- predictions_summary[predictions_summary$intensity == intensity & 
+                                                          predictions_summary$region == region & 
+                                                          predictions_summary$pred_type == 'pred_onset_year_change', 
+                                                        'delta_onset_touching5thpercentile']
+    onset_change_available_notrend <- predictions_summary[predictions_summary$intensity == intensity & 
+                                                          predictions_summary$region == region & 
+                                                          predictions_summary$pred_type == 'pred_onset_change', 
+                                                        'delta_onset_touching5thpercentile']
+    
+    # this stores THEORETICAL planting CDFs in the case that the available onset change happens
+    predictions_avail_onset_change <- data.frame(percentile = numeric(0),
+                                                   plant = numeric(0),
+                                                   type = numeric(0))
+    
+    # predict planting dates assuming the available onset change happens
+    for (percentile in c('percentile5', 'percentile25', 'percentile50', 'percentile75', 'percentile95')) {
       
+      percentile_int <-  strtoi(str_remove(percentile, 'percentile'))
+      
+      # take average of each percentile observed in the region x year
+      mean_observed <- predictions[predictions$percentile == percentile_int & predictions$type == 'observed', 'plant']
+      
+      # predictions
+      plant_pred_onset_change <- mean_observed + onset_change_available_notrend*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "onset_coef"]
+      plant_pred_onset_year_change <- mean_observed + onset_change_available_trend*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "onset_coef"] +
+                                                      year_change*coefs_onset_oi[coefs_onset_oi$intensity == intensity &
+                                                                                       coefs_onset_oi$percentile == percentile, "year_coef"]
+
+      # to store originals and predictions
+      predictions_avail_onset_change <- rbind(predictions_avail_onset_change, 
+                           data.frame(
+                             percentile = rep(percentile_int, 3),
+                             plant = c(mean_observed, plant_pred_onset_change, plant_pred_onset_year_change),
+                             type = c('observed', 'pred_onset_change', 'pred_onset_year_change')
+                             )
+                           )
+    }
+    
+    predictions_plot_avail_onset_change <- ggplot(predictions_avail_onset_change) +
+      geom_line(mapping = aes(x = plant, y = percentile, col = type), size = cdf_line_width) + # more transparent
+      scale_color_manual(values=c("black", '#EC7063', '#B9770E')) + # observed, no trend, trend cdf lines
+      #geom_point(mapping = aes(x = plant, y = percentile, col = type)) +
+      geom_vline(mapping = aes(xintercept = obs_onset), col = '#3498DB', size = 1, alpha = transparency_onset_demise_lines) + # observed onset
+      geom_vline(mapping = aes(xintercept = obs_onset + onset_change_available_trend), col = '#3498DB', linetype = 'dashed',  
+                 size = 1, alpha = transparency_onset_demise_lines) + # predicted onset
+      geom_vline(mapping = aes(xintercept = obs_onset + onset_change_available_notrend), col = '#3498DB', linetype = 'dashed', 
+                 size = 1, alpha = transparency_onset_demise_lines) + # predicted latest plant
+      ggtitle(paste('Planting CDF',intensity, region, 'region', 'available onset change')) +
+      xlab('Days after Aug 1') + 
+      xlim(40, 130) + # full axis: 30 to max_xlim
+      theme_bw() +
+      theme(panel.grid = element_blank(), 
+            axis.text.x = element_text(face="bold", size=12), # size for subplot = 14, size for fullplot = 12
+            axis.text.y = element_text(face="bold", size=12),
+            axis.title = element_text(size=12)
+            )
+    
     print(predictions_plot)
+    print(predictions_plot_avail_onset_change)
     #print(predictions_subplot)
   }
 }
@@ -779,30 +843,31 @@ delta_onset_likelihood_predicted <- data.frame(
 delta_onset_likelihood_predicted$yID<- delta_onset_likelihood_predicted$intensity
 delta_onset_likelihood_predicted$xID<- with(delta_onset_likelihood_predicted, paste0(region, trend))
 
+text_size <- 10
 ggplot(data = plant_delay_days_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_delay_days_predicted$value, 1)), size = 5) + # write the values
+  geom_text(aes(label = round(plant_delay_days_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Days", low = "blue", high = "red", midpoint = 0) +
   ggtitle("Average delay in planting date in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_delay_percent_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_delay_percent_predicted$value, 1)), size = 5) + # write the values
+  geom_text(aes(label = round(plant_delay_percent_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent planting that must be delayed in average 25km cell") +
   theme_bw()
 
 ggplot(data = DC_not_possible_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(DC_not_possible_predicted$value, 1)), size = 5) + # write the values
+  geom_text(aes(label = round(DC_not_possible_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent double cropping that's infeasible in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_window_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_window_predicted$value, 1)), size = 5) + # write the values
+  geom_text(aes(label = round(plant_window_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient(name = "Days", low = "red", high = "white") +
   ggtitle("Planting window in average 25km cell") +
   theme_bw()
@@ -816,7 +881,7 @@ ggplot(data = delta_onset_touching5thpercentile_predicted, mapping = aes(x = xID
 
 ggplot(data = delta_onset_likelihood_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = 5) + # write the values
+  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = text_size) + # write the values
   scale_fill_gradient(name = "Days", low = "white", high = "red") +
   ggtitle("Probability that onset will become hard limit for planting [%]") +
   theme_bw()
