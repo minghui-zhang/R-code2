@@ -873,49 +873,49 @@ plant_percent_unaffected_predicted$xID<- with(plant_percent_unaffected_predicted
 text_size <- 10
 ggplot(data = plant_delay_days_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(plant_delay_days_predicted$value, 0)), size = text_size) + # write the values
+  geom_text(aes(label = round(plant_delay_days_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Days", low = "blue", high = "red", midpoint = 0) +
   ggtitle("Average delay in planting date in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_delay_percent_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(plant_delay_percent_predicted$value, 0)), size = text_size) + # write the values
+  geom_text(aes(label = round(plant_delay_percent_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent planting that must be delayed in average 25km cell") +
   theme_bw()
 
 ggplot(data = DC_not_possible_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(DC_not_possible_predicted$value, 0)), size = text_size) + # write the values
+  geom_text(aes(label = round(DC_not_possible_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent double cropping that's infeasible in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_window_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(plant_window_predicted$value, 0)), size = text_size) + # write the values
+  geom_text(aes(label = round(plant_window_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient(name = "Days", low = "red", high = "white") +
   ggtitle("Planting window in average 25km cell") +
   theme_bw()
 
 ggplot(data = delta_onset_touching5thpercentile_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(delta_onset_touching5thpercentile_predicted$value, 1)), size = 5) + # write the values
+  geom_text(aes(label = round(delta_onset_touching5thpercentile_predicted$value, 1)), size = 5) + # write the values
   scale_fill_gradient2(name = "Days", low = "red", high = "blue", midpoint = 0) +
   ggtitle("Onset change at which planting dates experience hard limit [days]") +
   theme_bw()
 
 ggplot(data = delta_onset_likelihood_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = text_size) + # write the values
+  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = text_size) + # write the values
   scale_fill_gradient(name = "Days", low = "red", high = "white") +
   ggtitle("Probability that onset will become hard limit for planting [%]") +
   theme_bw()
 
 ggplot(data = plant_percent_unaffected_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  #geom_text(aes(label = round(plant_percent_unaffected_predicted$value, 0)), size = text_size) + # write the values
+  geom_text(aes(label = round(plant_percent_unaffected_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient(name = "Percent", low = "red", high = "white") +
   ggtitle("Percent planting unaffected by both onset and demise as hard limit in average 25km cell") +
   theme_bw()

@@ -174,6 +174,66 @@ infeasible_DC_area_map <- ggplot(newlyInfeasible_DC) +
 print(infeasible_DC_area_map)
 ```
 
+Area of 2014 DC that will be negatively affected by a hard limit imposed by onset and/or demise
+
+
+```{r}
+
+year <- 2014
+cell_sf_year <- cell_sf[cell_sf$year == year,]
+
+trend <- FALSE
+case <- 'medium'
+
+# the percent of DC that's infeasible compared to 2014 DC area
+if (trend & case == 'medium') {
+  NW_fraction <- 1 - 0.76
+  NE_fraction <- 1 - 0.64
+}
+
+if (trend & case == 'worst') {
+  NW_fraction <- 1 - 0.26
+  NE_fraction <- 1 - 0
+}
+
+if (!trend & case == 'medium') {
+  NW_fraction <- 1 - 0.91
+  NE_fraction <- 1 - 0.58
+}
+
+if (!trend & case == 'worst') {
+  NW_fraction <- 1 - 0.25
+  NE_fraction <- 1 - 0
+}
+
+
+NW_sf_year <- cell_sf_year[cell_sf_year$lat > -15 & cell_sf_year$lon < -54,]
+NE_sf_year <- cell_sf_year[cell_sf_year$lat > -15 & cell_sf_year$lon >= -54,]
+
+NW_sf_year$DC_area_affected_km2 <- NW_fraction*NW_sf_year$DC_area_km
+NE_sf_year$DC_area_affected_km2 <- NE_fraction*NE_sf_year$DC_area_km
+
+newlyaffected_DC <- rbind(NW_sf_year, NE_sf_year)
+
+newlyaffected_DC$affected_DC_area_category <- cut(newlyaffected_DC$DC_area_affected_km2, 
+                                         breaks = c(1, 10, 30, 50, 100, 150, 200, 400),
+                                         labels = c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200+'))
+
+affected_DC_area_map <- ggplot(newlyaffected_DC) +
+      geom_sf(aes(fill = affected_DC_area_category), colour = NA) +
+      scale_fill_brewer(type = 'seq', palette = 'YlOrRd', limits=c('1 - 10', '10 - 30', '30 - 50', 
+                                                    '50 - 100', '100 - 150', '150 - 200',
+                                                    '200+')) +
+      ggtitle(paste("DC area newly affected km2", case, " trend = ", trend)) +
+      geom_polygon(data = MT_outline, aes(x = long, y = lat), color = "black", alpha = 0, linetype = 1) +
+      theme_bw()
+
+print(affected_DC_area_map)
+
+```
+
 Mean onset and demise, 2004 to 2014
 
 ```{r}
