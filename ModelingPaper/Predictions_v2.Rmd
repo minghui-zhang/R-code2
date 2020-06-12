@@ -843,31 +843,58 @@ delta_onset_likelihood_predicted <- data.frame(
 delta_onset_likelihood_predicted$yID<- delta_onset_likelihood_predicted$intensity
 delta_onset_likelihood_predicted$xID<- with(delta_onset_likelihood_predicted, paste0(region, trend))
 
+# summary metric: the percent of soy that's NOT affected by delayed onset OR earlier demise max(0, 1 - % infeasible DC - % delay)
+plant_percent_unaffected_predicted <- data.frame(case = c('worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best',
+                                            'worst', 'worst', 'medium', 'medium', 'best', 'best'),
+                          intensity = c('SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC',
+                                        'SC', 'DC', 'SC', 'DC', 'SC', 'DC'), 
+                          region = c('east', 'east', 'east', 'east', 
+                                     'east', 'east', 'east', 'east',
+                                     'east', 'east', 'east', 'east',
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west', 'west', 'west',
+                                     'west', 'west', 'west', 'west'),
+                          trend = c('yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+                                    'no', 'no', 'no', 'no', 'no', 'no',
+                                    'yes', 'yes', 'yes', 'yes', 'yes', 'yes',
+                                    'no', 'no', 'no', 'no', 'no', 'no'),
+                          value = c(100 - 44.91, max(0, 100 - 61.35 - 74), 100 - 18.33, 100 - 24.14 - 12, 100 - 0, 100 - 0,
+                                    100 - 0, max(0, 100 - 6.77 - 100), 100 - 0, 100 - 0 - 42, 100 - 0, 100 - 0 - 9,
+                                    100 - 44.81, 100 - 53.22 - 21, 100 - 23.02, 100 - 24.02, 100 - 13.07, 100 - 13.64,
+                                    100 - 0, 100 - 0 - 75, 100 - 0, 100 - 0 - 9, 100 - 0, 100 - 0
+                                    ))
+plant_percent_unaffected_predicted$yID<- with(plant_percent_unaffected_predicted, paste0(case, intensity))
+plant_percent_unaffected_predicted$xID<- with(plant_percent_unaffected_predicted, paste0(region, trend))
+
 text_size <- 10
 ggplot(data = plant_delay_days_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_delay_days_predicted$value, 0)), size = text_size) + # write the values
+  #geom_text(aes(label = round(plant_delay_days_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Days", low = "blue", high = "red", midpoint = 0) +
   ggtitle("Average delay in planting date in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_delay_percent_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_delay_percent_predicted$value, 0)), size = text_size) + # write the values
+  #geom_text(aes(label = round(plant_delay_percent_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent planting that must be delayed in average 25km cell") +
   theme_bw()
 
 ggplot(data = DC_not_possible_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(DC_not_possible_predicted$value, 0)), size = text_size) + # write the values
+  #geom_text(aes(label = round(DC_not_possible_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient2(name = "Percent", low = "white", high = "red") +
   ggtitle("Percent double cropping that's infeasible in average 25km cell") +
   theme_bw()
 
 ggplot(data = plant_window_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(plant_window_predicted$value, 0)), size = text_size) + # write the values
+  #geom_text(aes(label = round(plant_window_predicted$value, 0)), size = text_size) + # write the values
   scale_fill_gradient(name = "Days", low = "red", high = "white") +
   ggtitle("Planting window in average 25km cell") +
   theme_bw()
@@ -881,9 +908,16 @@ ggplot(data = delta_onset_touching5thpercentile_predicted, mapping = aes(x = xID
 
 ggplot(data = delta_onset_likelihood_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
   geom_tile() +
-  geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = text_size) + # write the values
-  scale_fill_gradient(name = "Days", low = "white", high = "red") +
+  #geom_text(aes(label = round(delta_onset_likelihood_predicted$value, 1)), size = text_size) + # write the values
+  scale_fill_gradient(name = "Days", low = "red", high = "white") +
   ggtitle("Probability that onset will become hard limit for planting [%]") +
+  theme_bw()
+
+ggplot(data = plant_percent_unaffected_predicted, mapping = aes(x = xID, y = yID, fill = value)) +
+  geom_tile() +
+  #geom_text(aes(label = round(plant_percent_unaffected_predicted$value, 0)), size = text_size) + # write the values
+  scale_fill_gradient(name = "Percent", low = "red", high = "white") +
+  ggtitle("Percent planting unaffected by both onset and demise as hard limit in average 25km cell") +
   theme_bw()
 ```
 
