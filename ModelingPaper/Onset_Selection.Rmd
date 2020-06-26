@@ -397,6 +397,34 @@ all_results['onset_def_type_thres'] <- apply(all_results, 1, create_type_and_thr
 
 ```
 
+Compare onset and year coefficients between onset definitions
+
+```{r}
+onset_coef_DC_AA = all_results[all_results$model_type == 'FE' & all_results$intensity == 'DC' & all_results$onset_type == 'AA_25_persiann', 'onset_coef']
+onset_coef_DC_freq = all_results[all_results$model_type == 'FE' & all_results$intensity == 'DC' & all_results$onset_type == 'freq_10_persiann', 'onset_coef']
+
+onset_coef_SC_AA = all_results[all_results$model_type == 'FE' & all_results$intensity == 'SC' & all_results$onset_type == 'AA_25_persiann', 'onset_coef']
+onset_coef_SC_freq = all_results[all_results$model_type == 'FE' & all_results$intensity == 'SC' & all_results$onset_type == 'freq_10_persiann', 'onset_coef']
+
+year_coef_DC_AA = all_results[all_results$model_type == 'FE' & all_results$intensity == 'DC' & all_results$onset_type == 'AA_25_persiann', 'year_coef']
+year_coef_DC_freq = all_results[all_results$model_type == 'FE' & all_results$intensity == 'DC' & all_results$onset_type == 'freq_10_persiann', 'year_coef']
+
+year_coef_SC_AA = all_results[all_results$model_type == 'FE' & all_results$intensity == 'SC' & all_results$onset_type == 'AA_25_persiann', 'year_coef']
+year_coef_SC_freq = all_results[all_results$model_type == 'FE' & all_results$intensity == 'SC' & all_results$onset_type == 'freq_10_persiann', 'year_coef']
+
+print('freq - AA, onset, DC')
+print((onset_coef_DC_freq - onset_coef_DC_AA)/onset_coef_DC_freq)
+
+print('freq - AA, onset, SC')
+print((onset_coef_SC_freq - onset_coef_SC_AA)/onset_coef_SC_freq)
+
+print('freq - AA, year, DC')
+print((year_coef_DC_freq - year_coef_DC_AA)/year_coef_DC_freq)
+
+print('freq - AA, year, SC')
+print((year_coef_SC_freq - year_coef_SC_AA)/year_coef_SC_freq)
+```
+
 Perform chosen FE model specification for each onset definition
 
 ```{r}
